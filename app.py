@@ -3,9 +3,8 @@ from database import init_db, get_db, close_connection
 
 app = Flask(__name__)
 
-# Инициализация базы данных перед первым запросом
-@app.before_first_request
-def setup_database():
+# Инициализируем базу данных сразу при запуске приложения
+with app.app_context():
     init_db()
 
 @app.teardown_appcontext
