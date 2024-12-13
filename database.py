@@ -2,8 +2,10 @@ import sqlite3
 from flask import g
 import os
 
-# Указываем временную директорию для базы данных (поддерживает запись на Render)
-DATABASE = os.path.join('/tmp', 'database.db')
+# Указываем директорию для базы данных
+DATABASE_DIR = os.getenv("DATABASE_DIR", "/tmp")
+os.makedirs(DATABASE_DIR, exist_ok=True)
+DATABASE = os.path.join(DATABASE_DIR, "database.db")
 
 # Создаем соединение с базой данных
 def get_db():
@@ -41,4 +43,3 @@ def init_db():
         )
     ''')
     db.commit()
-    print("Tables created successfully.")
