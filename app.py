@@ -147,6 +147,25 @@ def dashboard():
         logging.error(f"Unexpected error in /dashboard: {e}")
         return jsonify({"error": "An unexpected error occurred. Please try again later."}), 500
 
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    try:
+        data = request.get_json()
+        logging.info(f"Received webhook data: {data}")
+        
+        # Логика обработки сообщений от Telegram
+        # Например, извлечение текста и отправка ответа
+        if 'message' in data:
+            chat_id = data['message']['chat']['id']
+            text = data['message'].get('text', '')
+
+            # Добавьте здесь отправку ответа через Telegram Bot API
+            
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        logging.error(f"Error handling webhook: {e}")
+        return jsonify({"error": "Failed to process webhook"}), 500
+
 if __name__ == '__main__':
     # Запускаем Telegram-бота в отдельном потоке
     threading.Thread(target=bot_main, daemon=True).start()
