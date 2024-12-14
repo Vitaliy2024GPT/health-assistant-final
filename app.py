@@ -15,11 +15,17 @@ app = Flask(__name__)
 
 # Инициализируем базу данных сразу при запуске приложения
 with app.app_context():
-    init_db()
+    try:
+        init_db()
+        logging.info("Database initialized successfully.")
+    except Exception as e:
+        logging.error(f"Error initializing database: {e}")
 
 @app.teardown_appcontext
 def teardown(exception):
     close_connection(exception)
+    if exception:
+        logging.error(f"Teardown error: {exception}")
 
 @app.route('/')
 def home():
@@ -55,10 +61,10 @@ def add_food():
         logging.info("Successfully added food entry to the database")
         return jsonify({"message": "Food entry added successfully."}), 201
     except ValueError as ve:
-        logging.error(str(ve))
+        logging.error(f"ValueError in /add_food: {ve}")
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
-        logging.error(str(e))
+        logging.error(f"Exception in /add_food: {e}")
         return jsonify({"error": "An error occurred while adding food."}), 500
 
 @app.route('/get_food', methods=['GET'])
@@ -88,10 +94,10 @@ def get_food():
         food_entries = [dict(row) for row in rows]
         return jsonify(food_entries), 200
     except ValueError as ve:
-        logging.error(str(ve))
+        logging.error(f"ValueError in /get_food: {ve}")
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
-        logging.error(str(e))
+        logging.error(f"Exception in /get_food: {e}")
         return jsonify({"error": "An error occurred while retrieving food data."}), 500
 
 @app.route('/dashboard', methods=['GET'])
@@ -135,10 +141,10 @@ def dashboard():
 
         return render_template('dashboard.html', stats=stats, user_id=user_id)
     except ValueError as ve:
-        logging.error(f"ValueError occurred: {ve}")
+        logging.error(f"ValueError in /dashboard: {ve}")
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
+        logging.error(f"Unexpected error in /dashboard: {e}")
         return jsonify({"error": "An unexpected error occurred. Please try again later."}), 500
 
 if __name__ == '__main__':
