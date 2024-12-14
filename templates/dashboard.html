@@ -8,33 +8,53 @@
 </head>
 <body>
     <h1>Dashboard for User {{ user_id }}</h1>
-    <canvas id="calorieChart" width="400" height="200"></canvas>
-    <script>
-        // Данные для графика
-        const labels = {{ stats['dates'] | safe }};
-        const data = {{ stats['calories'] | safe }};
+    {% if stats['dates'] and stats['calories'] %}
+        <canvas id="calorieChart" width="800" height="400"></canvas>
+        <script>
+            // Данные для графика
+            const labels = {{ stats['dates'] | safe }};
+            const data = {{ stats['calories'] | safe }};
 
-        const ctx = document.getElementById('calorieChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Calories Consumed',
-                    data: data,
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    borderColor: 'rgba(75, 192, 192, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                scales: {
-                    y: {
-                        beginAtZero: true
+            const ctx = document.getElementById('calorieChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Calories Consumed',
+                        data: data,
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Calories Consumed Over the Last 7 Days'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Calories'
+                            },
+                            beginAtZero: true
+                        }
                     }
                 }
-            }
-        });
-    </script>
+            });
+        </script>
+    {% else %}
+        <p>No data available to display.</p>
+    {% endif %}
 </body>
 </html>
