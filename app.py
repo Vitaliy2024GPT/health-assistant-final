@@ -92,54 +92,6 @@ def get_food():
         logging.error(str(e))
         return jsonify({"error": "An error occurred while retrieving food data."}), 500
 
-@app.route('/get_stats', methods=['GET'])
-def get_stats():
-    try:
-        user_id = request.args.get('user_id')
-        logging.info(f"Fetching stats for user_id: {user_id}")
-
-        if not user_id:
-            return jsonify({"error": "User ID is required."}), 400
-
-        user_id = int(user_id)
-        if user_id <= 0:
-            raise ValueError("User ID must be a positive integer.")
-
-        db = get_db()
-        cursor = db.cursor()
-
-        # Считаем общие калории за день
-        cursor.execute('''
-            SELECT SUM(calories) as total_calories, date
-            FROM nutrition
-            WHERE user_id = ?
-            GROUP BY date
-            ORDER BY date DESC
-            LIMIT 7
-        ''', (user_id,))
-        nutrition_stats = cursor.fetchall()
-
-        if not nutrition_stats:
-            logging.info(f"No stats available for user_id: {user_id}")
-            return '', 204  # HTTP 204 No Content
-
-        # Считаем общее количество записей
-        cursor.execute('SELECT COUNT(*) as total_entries FROM nutrition WHERE user_id = ?', (user_id,))
-        total_entries = cursor.fetchone()["total_entries"]
-
-        stats = {
-            "total_entries": total_entries,
-            "last_week_stats": [dict(row) for row in nutrition_stats]
-        }
-
-        return jsonify(stats), 200
-    except ValueError as ve:
-        logging.error(str(ve))
-        return jsonify({"error": str(ve)}), 400
-    except Exception as e:
-        logging.error(str(e))
-        return jsonify({"error": "An error occurred while retrieving statistics."}), 500
-
 @app.route('/dashboard', methods=['GET'])
 def dashboard():
     try:
@@ -165,8 +117,8 @@ def dashboard():
         ''', (user_id,))
         nutrition_stats = cursor.fetchall()
 
-        # Если нет данных
         if not nutrition_stats:
+            logging.info(f"No data found for dashboard, user_id: {user_id}")
             return "No data available for the dashboard", 200
 
         # Преобразуем данные для графика
@@ -175,14 +127,17 @@ def dashboard():
             "calories": [row['total_calories'] for row in nutrition_stats]
         }
 
-        # Рендерим HTML-шаблон
+        # Вычисляем среднее
+        average_calories = sum(stats["calories"]) / len(stats["calories"])
+        stats["average_calories"] = round(average_calories, 2)
+
         return render_template('dashboard.html', stats=stats, user_id=user_id)
     except ValueError as ve:
-        logging.error(str(ve))
+        logging.error(f"ValueError occurred: {ve}")
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
-        logging.error(str(e))
-        return jsonify({"error": "An error occurred while rendering the dashboard."}), 500
+        logging.error(f"Unexpected error: {e}")
+        return jsonify({"error": "An unexpected error occurred. Please try again later."}), 500
 
 if __name__ == '__main__':
     logging.info("Starting the Flask application")
