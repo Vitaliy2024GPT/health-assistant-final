@@ -1,5 +1,5 @@
 import logging
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from database import init_db, get_db, close_connection
 
 # Настройка логирования
@@ -139,6 +139,50 @@ def get_stats():
     except Exception as e:
         logging.error(str(e))
         return jsonify({"error": "An error occurred while retrieving statistics."}), 500
+
+@app.route('/dashboard', methods=['GET'])
+def dashboard():
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({"error": "User ID is required."}), 400
+
+        user_id = int(user_id)
+        if user_id <= 0:
+            raise ValueError("User ID must be a positive integer.")
+
+        db = get_db()
+        cursor = db.cursor()
+
+        # Получаем статистику за последние 7 дней
+        cursor.execute('''
+            SELECT SUM(calories) as total_calories, date
+            FROM nutrition
+            WHERE user_id = ?
+            GROUP BY date
+            ORDER BY date DESC
+            LIMIT 7
+        ''', (user_id,))
+        nutrition_stats = cursor.fetchall()
+
+        # Если нет данных
+        if not nutrition_stats:
+            return "No data available for the dashboard", 200
+
+        # Преобразуем данные для графика
+        stats = {
+            "dates": [row['date'] for row in nutrition_stats],
+            "calories": [row['total_calories'] for row in nutrition_stats]
+        }
+
+        # Рендерим HTML-шаблон
+        return render_template('dashboard.html', stats=stats, user_id=user_id)
+    except ValueError as ve:
+        logging.error(str(ve))
+        return jsonify({"error": str(ve)}), 400
+    except Exception as e:
+        logging.error(str(e))
+        return jsonify({"error": "An error occurred while rendering the dashboard."}), 500
 
 if __name__ == '__main__':
     logging.info("Starting the Flask application")
