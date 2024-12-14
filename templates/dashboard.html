@@ -1,11 +1,12 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
+<style>
+    .no-data {
+        color: gray;
+        text-align: center;
+        font-size: 18px;
+        margin-top: 50px;
+    }
+</style>
+
 <body>
     <h1>Dashboard for User {{ user_id }}</h1>
     {% if stats['dates'] and stats['calories'] %}
@@ -54,7 +55,6 @@
             });
         </script>
     {% else %}
-        <p>No data available to display.</p>
+        <p class="no-data">No data available to display.</p>
     {% endif %}
 </body>
-</html>
