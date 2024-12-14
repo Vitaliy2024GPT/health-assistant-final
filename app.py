@@ -5,7 +5,7 @@ from database import init_db, get_db, close_connection
 # Настройка логирования
 logging.basicConfig(
     filename='app.log',
-    level=logging.ERROR,
+    level=logging.INFO,
     format='%(asctime)s [%(levelname)s]: %(message)s'
 )
 
@@ -21,18 +21,21 @@ def teardown(exception):
 
 @app.route('/')
 def home():
+    logging.info("Home endpoint accessed")
     return "Database is ready!"
 
 @app.route('/add_food', methods=['POST'])
 def add_food():
     try:
         data = request.get_json()
+        logging.info(f"Received data for /add_food: {data}")
         user_id = data.get('user_id')
         food_name = data.get('food_name')
         calories = data.get('calories')
         date = data.get('date')
 
         if not all([user_id, food_name, calories, date]):
+            logging.warning("Missing fields in /add_food request")
             return jsonify({"error": "All fields are required."}), 400
 
         user_id = int(user_id)
@@ -47,6 +50,7 @@ def add_food():
         ''', (user_id, food_name, calories, date))
         db.commit()
 
+        logging.info("Successfully added food entry to the database")
         return jsonify({"message": "Food entry added successfully."}), 201
     except ValueError as ve:
         logging.error(str(ve))
@@ -59,7 +63,8 @@ def add_food():
 def get_food():
     try:
         user_id = request.args.get('user_id')
-        
+        logging.info(f"Fetching food entries for user_id: {user_id}")
+
         if not user_id:
             return jsonify({"error": "User ID is required."}), 400
 
@@ -75,7 +80,8 @@ def get_food():
         rows = cursor.fetchall()
 
         if not rows:
-            return jsonify({"message": "No food entries found for this user."}), 200
+            logging.info(f"No food entries found for user_id: {user_id}")
+            return '', 204  # HTTP 204 No Content
 
         food_entries = [dict(row) for row in rows]
         return jsonify(food_entries), 200
@@ -90,6 +96,7 @@ def get_food():
 def get_stats():
     try:
         user_id = request.args.get('user_id')
+        logging.info(f"Fetching stats for user_id: {user_id}")
 
         if not user_id:
             return jsonify({"error": "User ID is required."}), 400
@@ -113,7 +120,8 @@ def get_stats():
         nutrition_stats = cursor.fetchall()
 
         if not nutrition_stats:
-            return jsonify({"message": "No data available for the last week."}), 200
+            logging.info(f"No stats available for user_id: {user_id}")
+            return '', 204  # HTTP 204 No Content
 
         # Считаем общее количество записей
         cursor.execute('SELECT COUNT(*) as total_entries FROM nutrition WHERE user_id = ?', (user_id,))
@@ -133,4 +141,5 @@ def get_stats():
         return jsonify({"error": "An error occurred while retrieving statistics."}), 500
 
 if __name__ == '__main__':
+    logging.info("Starting the Flask application")
     app.run(host='0.0.0.0', port=5000)
