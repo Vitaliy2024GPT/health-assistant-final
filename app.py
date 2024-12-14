@@ -1,6 +1,8 @@
 import logging
 from flask import Flask, request, jsonify, render_template
 from database import init_db, get_db, close_connection
+import threading
+from bot import main as bot_main  # Импорт функции main из файла bot.py
 
 # Настройка логирования
 logging.basicConfig(
@@ -140,5 +142,9 @@ def dashboard():
         return jsonify({"error": "An unexpected error occurred. Please try again later."}), 500
 
 if __name__ == '__main__':
-    logging.info("Starting the Flask application")
+    # Запускаем Telegram-бота в отдельном потоке
+    threading.Thread(target=bot_main, daemon=True).start()
+
+    # Запускаем Flask-приложение
+    logging.info("Starting the Flask application with bot integration")
     app.run(host='0.0.0.0', port=5000)
