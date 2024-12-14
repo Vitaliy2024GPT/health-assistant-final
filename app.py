@@ -53,5 +53,37 @@ def get_food():
     food_entries = [dict(row) for row in rows]
     return jsonify(food_entries), 200
 
+@app.route('/get_stats', methods=['GET'])
+def get_stats():
+    user_id = request.args.get('user_id')
+
+    if not user_id:
+        return jsonify({"error": "User ID is required."}), 400
+
+    db = get_db()
+    cursor = db.cursor()
+
+    # Считаем общие калории за день
+    cursor.execute('''
+        SELECT SUM(calories) as total_calories, date
+        FROM nutrition
+        WHERE user_id = ?
+        GROUP BY date
+        ORDER BY date DESC
+        LIMIT 7
+    ''', (user_id,))
+    nutrition_stats = cursor.fetchall()
+
+    # Считаем общее количество записей
+    cursor.execute('SELECT COUNT(*) as total_entries FROM nutrition WHERE user_id = ?', (user_id,))
+    total_entries = cursor.fetchone()["total_entries"]
+
+    stats = {
+        "total_entries": total_entries,
+        "last_week_stats": [dict(row) for row in nutrition_stats]
+    }
+
+    return jsonify(stats), 200
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
