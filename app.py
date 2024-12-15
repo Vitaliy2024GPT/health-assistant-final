@@ -1,16 +1,21 @@
+import os
 import logging
 from flask import Flask, request, jsonify
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+)
 
-# Настройка логирования
+# ====== Настройка логирования ======
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# Flask-приложение
+# ====== Flask-приложение ======
 app = Flask(__name__)
 
 # Главная страница
@@ -18,11 +23,15 @@ app = Flask(__name__)
 def home():
     return "Welcome to the Health Assistant Bot API!"
 
+# Проверка статуса сервера
 @app.route("/status")
 def status():
     return "Flask server is running!"
 
-# Telegram webhook
+# ====== Глобальная переменная для Telegram бота ======
+bot_app = None
+
+# Обработчик для Telegram webhook
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
     try:
@@ -39,24 +48,33 @@ def telegram_webhook():
         logger.error(f"Error handling webhook: {e}")
         return jsonify({"error": "Failed to process webhook"}), 500
 
-# Telegram токен
-TELEGRAM_TOKEN = "ваш_токен"
+# ====== Telegram токен ======
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Обработчик команды /start
+if not TELEGRAM_TOKEN:
+    raise ValueError("TELEGRAM_TOKEN не задан в переменных окружения!")
+
+# ====== Обработчики команд ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ответ на команду /start"""
     await update.message.reply_text("Welcome to Health Assistant Bot!")
 
-# Функция запуска Telegram-бота
+# ====== Запуск Telegram-бота ======
 def start_bot():
     global bot_app
     bot_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    # Добавляем обработчик команды /start
     bot_app.add_handler(CommandHandler("start", start))
+
+    # Логируем успешный запуск бота
     logger.info("Telegram Bot started")
 
+# ====== Точка входа ======
 if __name__ == "__main__":
-    # Запуск Telegram бота
+    # Запускаем Telegram бота
     start_bot()
 
-    # Запуск Flask-сервера
+    # Запускаем Flask-сервер
     logger.info("Starting Flask application...")
     app.run(host="0.0.0.0", port=10000, debug=False)
