@@ -1,5 +1,6 @@
 import logging
-from flask import Flask
+import os
+from flask import Flask, request, jsonify
 from threading import Thread
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -23,7 +24,12 @@ def status():
     return "Flask server is running!"
 
 # Telegram токен
-TELEGRAM_TOKEN = "ваш_токен"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TELEGRAM_TOKEN:
+    raise ValueError("TELEGRAM_TOKEN is not set!")
+
+# Создаем приложение Telegram Bot
+bot_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52,25 +58,35 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "An error occurred while processing your request. Please try again later."
         )
 
-# Функция запуска Telegram-бота
-def start_bot():
+# Добавляем обработчики команд
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CommandHandler("dashboard", dashboard))
+
+# Обработчик webhook для Telegram
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
     try:
-        # Создаем приложение Telegram Bot
-        bot_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+        data = request.get_json()
+        logging.info(f"Webhook received data: {data}")
 
-        # Добавляем обработчики команд
-        bot_app.add_handler(CommandHandler("start", start))
-        bot_app.add_handler(CommandHandler("dashboard", dashboard))
+        # Обрабатываем обновления от Telegram
+        update = Update.de_json(data, bot_app.bot)
+        bot_app.process_update(update)
 
-        # Запуск бота
-        logger.info("Starting Telegram Bot...")
-        bot_app.run_polling()
+        # Подтверждаем Telegram, что webhook обработан
+        return jsonify({"status": "ok"}), 200
     except Exception as e:
-        logger.error(f"Failed to start Telegram Bot: {e}")
+        logger.error(f"Error handling webhook: {e}")
+        return jsonify({"error": "Failed to process webhook"}), 500
 
-# Основной блок
+# Функция запуска Telegram-бота через polling
+def start_bot():
+    logger.info("Starting Telegram Bot via polling...")
+    bot_app.run_polling()
+
+# Главная функция
 if __name__ == "__main__":
-    # Запуск Telegram-бота в отдельном потоке
+    # Запуск polling в отдельном потоке (для тестов локально)
     Thread(target=start_bot).start()
 
     # Запуск Flask-приложения
