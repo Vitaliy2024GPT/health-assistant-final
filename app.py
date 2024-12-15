@@ -55,9 +55,10 @@ def telegram_webhook():
         data = request.get_json()
         logger.info(f"Webhook received data: {data}")
 
-        # Обрабатываем обновление в асинхронном режиме
+        # Обрабатываем обновление в существующем цикле событий
         update = Update.de_json(data, bot_app.bot)
-        asyncio.run(bot_app.process_update(update))
+        loop = asyncio.get_event_loop()
+        loop.create_task(bot_app.process_update(update))
 
         return jsonify({"status": "ok"}), 200
     except Exception as e:
