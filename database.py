@@ -10,7 +10,6 @@ DATABASE = os.path.join(DATABASE_DIR, "database.db")
 def get_db():
     """
     Возвращает соединение с базой данных SQLite.
-    Если соединение еще не установлено, создаёт его и возвращает.
     """
     db = getattr(g, '_database', None)
     if db is None:
@@ -21,7 +20,6 @@ def get_db():
 def close_connection(exception):
     """
     Закрывает соединение с базой данных, если оно открыто.
-    Эта функция может быть зарегистрирована в Flask и будет вызываться автоматически.
     """
     db = getattr(g, '_database', None)
     if db is not None:
@@ -29,7 +27,7 @@ def close_connection(exception):
 
 def init_db():
     """
-    Создаёт таблицы 'users' и 'nutrition', если они не существуют.
+    Создаёт таблицы: users, nutrition, user_chat (если они не существуют)
     """
     db = get_db()
     cursor = db.cursor()
@@ -50,13 +48,19 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_chat (
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            UNIQUE(user_id, chat_id)
+        )
+    ''')
     db.commit()
 
 def add_user(name, email):
     """
     Добавляет нового пользователя в таблицу users.
     Возвращает id добавленного пользователя.
-    Если email уже существует, вернёт ошибку (можете обработать её снаружи).
     """
     db = get_db()
     cursor = db.cursor()
@@ -66,22 +70,16 @@ def add_user(name, email):
 
 def get_user_by_email(email):
     """
-    Возвращает информацию о пользователе по email.
-    Если пользователя нет, вернёт None.
+    Возвращает информацию о пользователе по email или None.
     """
     db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
-    user = cursor.fetchone()
-    return user  # user будет объектом Row или None
+    return cursor.fetchone()
 
 def add_meal(user_id, food_name, calories, date):
     """
-    Добавляет запись о приёме пищи в таблицу nutrition.
-    user_id — id пользователя из таблицы users.
-    food_name — название продукта.
-    calories — количество калорий.
-    date — строка с датой, например "2024-12-16".
+    Добавляет запись о приёме пищи для конкретного user_id.
     """
     db = get_db()
     cursor = db.cursor()
@@ -92,14 +90,30 @@ def add_meal(user_id, food_name, calories, date):
 
 def get_user_meals(user_id):
     """
-    Возвращает список всех приёмов пищи для указанного пользователя.
-    Возвращает список словарей формата:
-    [{'id': 1, 'user_id': 1, 'food_name': 'Apple', 'calories': 100, 'date': '2024-12-16'}, ...]
-    Если нет записей, вернёт пустой список.
+    Возвращает список приёмов пищи для указанного пользователя.
     """
     db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT * FROM nutrition WHERE user_id = ?", (user_id,))
     rows = cursor.fetchall()
-    meals = [dict(row) for row in rows]  # конвертируем Row объекты в словари
+    meals = [dict(row) for row in rows]
     return meals
+
+def link_user_chat(user_id, chat_id):
+    """
+    Связывает пользователя (user_id) с телеграм-чатом (chat_id).
+    """
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("INSERT OR IGNORE INTO user_chat (user_id, chat_id) VALUES (?, ?)", (user_id, chat_id))
+    db.commit()
+
+def get_user_id_by_chat_id(chat_id):
+    """
+    Возвращает user_id по chat_id. Если не найдено, возвращает None.
+    """
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT user_id FROM user_chat WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    return row["user_id"] if row else None
