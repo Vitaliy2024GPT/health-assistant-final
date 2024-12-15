@@ -1,5 +1,6 @@
 import os
 import logging
+import threading
 from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import (
@@ -34,7 +35,11 @@ bot_app = None
 # Обработчик для Telegram webhook
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
+    global bot_app
     try:
+        if not bot_app:
+            raise ValueError("Bot is not initialized!")
+
         # Получаем данные от Telegram
         data = request.get_json()
         logger.info(f"Webhook received data: {data}")
@@ -62,19 +67,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ====== Запуск Telegram-бота ======
 def start_bot():
     global bot_app
+    if bot_app:
+        logger.info("Telegram Bot already running.")
+        return
+
     bot_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     # Добавляем обработчик команды /start
     bot_app.add_handler(CommandHandler("start", start))
 
     # Логируем успешный запуск бота
-    logger.info("Telegram Bot started")
+    logger.info("Telegram Bot started successfully")
+
+    # Запуск бота в фоновом потоке
+    threading.Thread(target=bot_app.run_polling, daemon=True).start()
+    logger.info("Telegram Bot is running in a separate thread.")
 
 # ====== Точка входа ======
 if __name__ == "__main__":
-    # Запускаем Telegram бота
-    start_bot()
+    try:
+        # Запускаем Telegram бота
+        start_bot()
 
-    # Запускаем Flask-сервер
-    logger.info("Starting Flask application...")
-    app.run(host="0.0.0.0", port=10000, debug=False)
+        # Запускаем Flask-сервер
+        logger.info("Starting Flask application...")
+        app.run(host="0.0.0.0", port=10000, debug=False)
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
