@@ -4,7 +4,7 @@ import logging
 from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Updater, CommandHandler
-from database import init_db, close_connection, add_user, get_user_by_email, add_meal, get_user_meals
+from database import init_db, close_connection, add_user, get_user_by_email, add_meal, get_user_meals, link_user_chat, get_user_id_by_chat_id
 
 # ====== Логирование ======
 logging.basicConfig(
@@ -40,30 +40,47 @@ if not TELEGRAM_TOKEN:
 updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
 dispatcher = updater.dispatcher
 
-# ----- Обработчики команд -----
-
 def start(update, context):
     """Ответ на команду /start"""
-    update.message.reply_text("Welcome to Health Assistant Bot!")
+    update.message.reply_text("Welcome to Health Assistant Bot!\nUse /register name email to create an account.")
 
-def adduser_command(update, context):
+def register_command(update, context):
+    """
+    /register name email
+    Регистрирует нового пользователя и связывает его с текущим chat_id.
+    """
     if len(context.args) < 2:
-        update.message.reply_text("Usage: /adduser name email")
+        update.message.reply_text("Usage: /register name email")
         return
     name = context.args[0]
     email = context.args[1]
 
     user = get_user_by_email(email)
     if user:
-        update.message.reply_text("Этот email уже зарегистрирован.")
+        # Пользователь уже есть, просто свяжем с этим чат_id, если не связаны
+        user_id = user["id"]
+        link_user_chat(user_id, update.message.chat_id)
+        update.message.reply_text(f"User already existed. Linked this chat to user_id {user_id}.")
     else:
+        # Создаём нового пользователя
         user_id = add_user(name, email)
-        update.message.reply_text(f"Пользователь добавлен! ID: {user_id}")
+        link_user_chat(user_id, update.message.chat_id)
+        update.message.reply_text(f"User registered! ID: {user_id} linked to this chat.")
 
 def addmeal_command(update, context):
+    """
+    /addmeal food_name calories
+    Добавляет приём пищи для текущего пользователя (определяем по chat_id).
+    """
     if len(context.args) < 2:
         update.message.reply_text("Usage: /addmeal food_name calories")
         return
+    
+    user_id = get_user_id_by_chat_id(update.message.chat_id)
+    if not user_id:
+        update.message.reply_text("You are not registered. Use /register name email first.")
+        return
+
     food_name = context.args[0]
     try:
         calories = int(context.args[1])
@@ -73,12 +90,19 @@ def addmeal_command(update, context):
 
     from datetime import date
     today = date.today().isoformat()
-    user_id = 1  # тестово
     add_meal(user_id, food_name, calories, today)
     update.message.reply_text(f"Meal added: {food_name}, {calories} kcal")
 
 def meals_command(update, context):
-    user_id = 1  # тестово
+    """
+    /meals
+    Показывает все приёмы пищи для текущего пользователя.
+    """
+    user_id = get_user_id_by_chat_id(update.message.chat_id)
+    if not user_id:
+        update.message.reply_text("You are not registered. Use /register name email first.")
+        return
+
     meals = get_user_meals(user_id)
     if not meals:
         update.message.reply_text("No meals found.")
@@ -86,13 +110,12 @@ def meals_command(update, context):
         lines = [f"{m['date']}: {m['food_name']} - {m['calories']} kcal" for m in meals]
         update.message.reply_text("\n".join(lines))
 
-# Добавляем обработчики команд к dispatcher
+# Добавляем обработчики команд
 dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(CommandHandler("adduser", adduser_command))
+dispatcher.add_handler(CommandHandler("register", register_command))
 dispatcher.add_handler(CommandHandler("addmeal", addmeal_command))
 dispatcher.add_handler(CommandHandler("meals", meals_command))
 
-# Обработчик webhook
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
     try:
