@@ -1,9 +1,9 @@
 import os
 import logging
+import sys
 from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Updater, CommandHandler
-import sys
 
 # ====== Настройка логирования ======
 logging.basicConfig(
@@ -30,7 +30,7 @@ if not TELEGRAM_TOKEN:
     logger.error("TELEGRAM_TOKEN не задан в переменных окружения!")
     sys.exit(1)
 
-# ====== Инициализация бота (v13.x) ======
+# ====== Инициализация бота (python-telegram-bot v13.x) ======
 updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
 dispatcher = updater.dispatcher
 
@@ -55,7 +55,7 @@ def telegram_webhook():
         return jsonify({"error": "Failed to process webhook"}), 500
 
 if __name__ == "__main__":
-    # Берем порт из переменной окружения (Render задает его автоматически)
+    # На Render порт задаётся переменной окружения PORT
     port = int(os.environ.get("PORT", 5000))
     logger.info("Starting Flask application...")
     app.run(host="0.0.0.0", port=port)
