@@ -7,6 +7,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
 )
+import asyncio
 
 # ====== Настройка логирования ======
 logging.basicConfig(
@@ -54,9 +55,9 @@ def telegram_webhook():
         data = request.get_json()
         logger.info(f"Webhook received data: {data}")
 
-        # Обрабатываем обновление
+        # Обрабатываем обновление в асинхронном режиме
         update = Update.de_json(data, bot_app.bot)
-        bot_app.process_update(update)
+        asyncio.run(bot_app.process_update(update))
 
         return jsonify({"status": "ok"}), 200
     except Exception as e:
