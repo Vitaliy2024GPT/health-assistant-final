@@ -4,9 +4,9 @@ import logging
 from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Updater, CommandHandler
-from database import init_db, close_connection, add_user, get_user_by_email, add_meal, get_user_meals, link_user_chat, get_user_id_by_chat_id
+from database import init_db, close_connection, add_user, get_user_by_chat_id, add_meal, get_user_meals
 
-# ====== Логирование ======
+# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Инициализируем базу данных
+# Инициализируем базу данных при старте приложения
 with app.app_context():
     init_db()
 
+# Регистрируем функцию для закрытия соединения с БД после обработки запроса
 app.teardown_appcontext(close_connection)
 
 @app.route("/")
@@ -29,7 +30,7 @@ def home():
 def status():
     return "Flask server is running!"
 
-# ====== Telegram токен ======
+# Telegram токен из переменных окружения
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 if not TELEGRAM_TOKEN:
@@ -41,44 +42,33 @@ updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
 dispatcher = updater.dispatcher
 
 def start(update, context):
-    """Ответ на команду /start"""
-    update.message.reply_text("Welcome to Health Assistant Bot!\nUse /register name email to create an account.")
+    update.message.reply_text("Welcome to Health Assistant Bot!\nUse /register <name> to create an account.")
 
 def register_command(update, context):
-    """
-    /register name email
-    Регистрирует нового пользователя и связывает его с текущим chat_id.
-    """
-    if len(context.args) < 2:
-        update.message.reply_text("Usage: /register name email")
+    if len(context.args) < 1:
+        update.message.reply_text("Usage: /register <name>")
         return
     name = context.args[0]
-    email = context.args[1]
+    chat_id = update.message.chat_id
 
-    user = get_user_by_email(email)
+    user = get_user_by_chat_id(chat_id)
     if user:
-        # Пользователь уже есть, просто свяжем с этим чат_id, если не связаны
-        user_id = user["id"]
-        link_user_chat(user_id, update.message.chat_id)
-        update.message.reply_text(f"User already existed. Linked this chat to user_id {user_id}.")
+        # Если пользователь уже есть, сообщаем об этом
+        update.message.reply_text(f"You are already registered as {user['name']}.")
     else:
         # Создаём нового пользователя
-        user_id = add_user(name, email)
-        link_user_chat(user_id, update.message.chat_id)
-        update.message.reply_text(f"User registered! ID: {user_id} linked to this chat.")
+        user_id = add_user(name, chat_id)
+        update.message.reply_text(f"User registered! ID: {user_id} for this chat.")
 
 def addmeal_command(update, context):
-    """
-    /addmeal food_name calories
-    Добавляет приём пищи для текущего пользователя (определяем по chat_id).
-    """
     if len(context.args) < 2:
         update.message.reply_text("Usage: /addmeal food_name calories")
         return
-    
-    user_id = get_user_id_by_chat_id(update.message.chat_id)
-    if not user_id:
-        update.message.reply_text("You are not registered. Use /register name email first.")
+
+    chat_id = update.message.chat_id
+    user = get_user_by_chat_id(chat_id)
+    if not user:
+        update.message.reply_text("You are not registered. Use /register <name> first.")
         return
 
     food_name = context.args[0]
@@ -90,20 +80,17 @@ def addmeal_command(update, context):
 
     from datetime import date
     today = date.today().isoformat()
-    add_meal(user_id, food_name, calories, today)
+    add_meal(user["id"], food_name, calories, today)
     update.message.reply_text(f"Meal added: {food_name}, {calories} kcal")
 
 def meals_command(update, context):
-    """
-    /meals
-    Показывает все приёмы пищи для текущего пользователя.
-    """
-    user_id = get_user_id_by_chat_id(update.message.chat_id)
-    if not user_id:
-        update.message.reply_text("You are not registered. Use /register name email first.")
+    chat_id = update.message.chat_id
+    user = get_user_by_chat_id(chat_id)
+    if not user:
+        update.message.reply_text("You are not registered. Use /register <name> first.")
         return
 
-    meals = get_user_meals(user_id)
+    meals = get_user_meals(user["id"])
     if not meals:
         update.message.reply_text("No meals found.")
     else:
