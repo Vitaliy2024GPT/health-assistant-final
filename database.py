@@ -21,9 +21,9 @@ def close_connection(exception):
 
 def init_db():
     """
-    Создаём таблицы: users, nutrition
-    users: id, name, chat_id (unique)
-    nutrition: id, user_id, food_name, calories, date
+    Создаём таблицы:
+    users: хранит (id, name, chat_id)
+    nutrition: хранит приёмы пищи (user_id, food_name, calories, date)
     """
     db = get_db()
     cursor = db.cursor()
@@ -48,9 +48,8 @@ def init_db():
 
 def add_user(name, chat_id):
     """
-    Добавляет нового пользователя с указанным name и chat_id.
-    Возвращает id пользователя.
-    Если chat_id уже существует, будет ошибка (можно обработать).
+    Добавляет нового пользователя по имени и chat_id.
+    Возвращает id нового пользователя.
     """
     db = get_db()
     cursor = db.cursor()
@@ -60,7 +59,7 @@ def add_user(name, chat_id):
 
 def get_user_by_chat_id(chat_id):
     """
-    Возвращает пользователя по chat_id или None.
+    Получает пользователя по chat_id или возвращает None, если не найден.
     """
     db = get_db()
     cursor = db.cursor()
@@ -68,6 +67,9 @@ def get_user_by_chat_id(chat_id):
     return cursor.fetchone()
 
 def add_meal(user_id, food_name, calories, date):
+    """
+    Добавляет запись о приёме пищи для указанного user_id.
+    """
     db = get_db()
     cursor = db.cursor()
     cursor.execute("INSERT INTO nutrition (user_id, food_name, calories, date) VALUES (?, ?, ?, ?)",
@@ -76,9 +78,11 @@ def add_meal(user_id, food_name, calories, date):
     return cursor.lastrowid
 
 def get_user_meals(user_id):
+    """
+    Возвращает список приёмов пищи для user_id.
+    """
     db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT * FROM nutrition WHERE user_id = ?", (user_id,))
     rows = cursor.fetchall()
-    meals = [dict(row) for row in rows]
-    return meals
+    return [dict(row) for row in rows]
