@@ -53,7 +53,6 @@ def start(update, context):
         "/google_fit to connect Google Fit account."
     )
 
-# Регистрация пользователя
 def register_command(update, context):
     if len(context.args) < 1:
         update.message.reply_text("Usage: /register <name>")
@@ -67,7 +66,6 @@ def register_command(update, context):
         user_id = add_user(name, chat_id)
         update.message.reply_text(f"Registered successfully! ID: {user_id}")
 
-# Логирование приёма пищи
 def addmeal_command(update, context):
     try:
         food_name, calories = context.args[0], int(context.args[1])
@@ -80,34 +78,10 @@ def addmeal_command(update, context):
     except (IndexError, ValueError):
         update.message.reply_text("Usage: /addmeal <food_name> <calories>")
 
-# Просмотр всех приёмов пищи
-def meals_command(update, context):
-    user = get_user_by_chat_id(update.message.chat_id)
-    meals = get_user_meals(user["id"]) if user else []
-    if not meals:
-        update.message.reply_text("No meals found.")
-    else:
-        update.message.reply_text("\n".join(f"{m['date']}: {m['food_name']} - {m['calories']} kcal" for m in meals))
+def google_fit_command(update, context):
+    update.message.reply_text(f"Connect your Google Fit account here: {url_for('authorize', _external=True)}")
 
-# Отчёт о калориях за неделю
-def report_command(update, context):
-    user = get_user_by_chat_id(update.message.chat_id)
-    if not user:
-        update.message.reply_text("Register first using /register.")
-        return
-    total_cal = get_calories_last_7_days(user["id"])
-    avg_cal = total_cal / 7
-    update.message.reply_text(f"Weekly total: {total_cal} kcal\nAverage: {avg_cal:.2f} kcal/day")
-
-# Совет по питанию
-def diet_advice_command(update, context):
-    user = get_user_by_chat_id(update.message.chat_id)
-    meals_7_days = get_meals_last_7_days(user["id"]) if user else []
-    avg_cal = sum(m['calories'] for m in meals_7_days) / 7 if meals_7_days else 0
-    advice = "Moderate intake. Keep it balanced!" if 1500 <= avg_cal <= 3000 else "Adjust your diet accordingly."
-    update.message.reply_text(f"Average: {avg_cal:.2f} kcal/day\nAdvice: {advice}")
-
-# Подключение Google Fit
+# Google Fit OAuth маршруты
 @app.route("/authorize")
 def authorize():
     params = {
@@ -134,13 +108,23 @@ def oauth2callback():
         return "Google Fit connected successfully!"
     return "Error during authorization."
 
-# Добавление команд в бота
+@app.route("/telegram_webhook", methods=["POST"])
+def telegram_webhook():
+    try:
+        data = request.get_json(force=True)
+        logger.info(f"Webhook received data: {data}")
+        update = Update.de_json(data, updater.bot)
+        dispatcher.process_update(update)
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        logger.error(f"Error handling webhook: {e}")
+        return jsonify({"error": "Failed to process webhook"}), 500
+
+# Добавление команд
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("register", register_command))
 dispatcher.add_handler(CommandHandler("addmeal", addmeal_command))
-dispatcher.add_handler(CommandHandler("meals", meals_command))
-dispatcher.add_handler(CommandHandler("report", report_command))
-dispatcher.add_handler(CommandHandler("diet_advice", diet_advice_command))
+dispatcher.add_handler(CommandHandler("google_fit", google_fit_command))
 
 # Запуск сервера
 if __name__ == "__main__":
