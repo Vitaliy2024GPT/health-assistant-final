@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify, redirect, session, url_for
 from telegram import Update
 from telegram.ext import Updater, CommandHandler
 from database import (
-    init_db, close_connection, get_user_by_chat_id
+    init_db, close_connection, get_user_by_chat_id, save_google_token
 )
 import requests
 from datetime import datetime, timedelta
@@ -71,13 +71,19 @@ def get_google_fit_data(access_token):
 
 # Telegram команды
 def start(update, context):
-    update.message.reply_text("Welcome to Health Assistant Bot!\nUse /google_fit to connect Google Fit.")
+    update.message.reply_text(
+        "Welcome to Health Assistant Bot!\nUse /google_fit to connect Google Fit."
+    )
 
 def fit_data_command(update, context):
-    access_token = session.get("access_token")
+    chat_id = update.message.chat_id
+    user = get_user_by_chat_id(chat_id)
+    access_token = user.get("google_token") if user else None
+
     if not access_token:
         update.message.reply_text("Google Fit is not connected. Use /google_fit to connect.")
         return
+
     calories = get_google_fit_data(access_token)
     if calories is not None:
         update.message.reply_text(f"Calories burned in the last 24 hours: {calories} kcal.")
@@ -85,6 +91,8 @@ def fit_data_command(update, context):
         update.message.reply_text("Failed to fetch data. Try again later.")
 
 def google_fit_command(update, context):
+    chat_id = update.message.chat_id
+    session["chat_id"] = chat_id  # Сохраняем chat_id для авторизации
     update.message.reply_text(f"Connect Google Fit here: {url_for('authorize', _external=True)}")
 
 # Google OAuth маршруты
@@ -106,6 +114,10 @@ def authorize():
 @app.route("/oauth2callback")
 def oauth2callback():
     code = request.args.get("code")
+    chat_id = session.get("chat_id")
+    if not chat_id:
+        return "Error: Chat ID is missing. Please restart the connection."
+
     payload = {
         "code": code,
         "client_id": GOOGLE_CLIENT_ID,
@@ -115,7 +127,8 @@ def oauth2callback():
     }
     response = requests.post("https://oauth2.googleapis.com/token", data=payload)
     if response.ok:
-        session["access_token"] = response.json().get("access_token")
+        access_token = response.json().get("access_token")
+        save_google_token(chat_id, access_token)  # Сохраняем токен в базе данных
         return "Google Fit connected successfully!"
     return "Error during authorization."
 
