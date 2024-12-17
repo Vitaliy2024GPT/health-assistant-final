@@ -4,7 +4,8 @@ import logging
 from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Updater, CommandHandler
-from database import init_db, close_connection, add_user, get_user_by_chat_id, add_meal, get_user_meals
+from database import init_db, close_connection, add_user, get_user_by_chat_id, add_meal, get_user_meals, get_calories_last_7_days
+from datetime import date
 
 # Настройка логирования
 logging.basicConfig(
@@ -53,10 +54,8 @@ def register_command(update, context):
 
     user = get_user_by_chat_id(chat_id)
     if user:
-        # Если пользователь уже есть, сообщаем об этом
         update.message.reply_text(f"You are already registered as {user['name']}.")
     else:
-        # Создаём нового пользователя
         user_id = add_user(name, chat_id)
         update.message.reply_text(f"User registered! ID: {user_id} for this chat.")
 
@@ -78,9 +77,8 @@ def addmeal_command(update, context):
         update.message.reply_text("Calories must be a number.")
         return
 
-    from datetime import date
-    today = date.today().isoformat()
-    add_meal(user["id"], food_name, calories, today)
+    today_str = date.today().isoformat()
+    add_meal(user["id"], food_name, calories, today_str)
     update.message.reply_text(f"Meal added: {food_name}, {calories} kcal")
 
 def meals_command(update, context):
@@ -97,11 +95,26 @@ def meals_command(update, context):
         lines = [f"{m['date']}: {m['food_name']} - {m['calories']} kcal" for m in meals]
         update.message.reply_text("\n".join(lines))
 
+def report_command(update, context):
+    """
+    Показывает суммарные калории за последние 7 дней и средние калории в день.
+    """
+    chat_id = update.message.chat_id
+    user = get_user_by_chat_id(chat_id)
+    if not user:
+        update.message.reply_text("You are not registered. Use /register <name> first.")
+        return
+
+    total_cal = get_calories_last_7_days(user["id"])
+    avg_cal = total_cal / 7.0
+    update.message.reply_text(f"Last 7 days total: {total_cal} kcal\nAverage per day: {avg_cal:.2f} kcal")
+
 # Добавляем обработчики команд
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("register", register_command))
 dispatcher.add_handler(CommandHandler("addmeal", addmeal_command))
 dispatcher.add_handler(CommandHandler("meals", meals_command))
+dispatcher.add_handler(CommandHandler("report", report_command))
 
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
