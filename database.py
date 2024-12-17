@@ -1,6 +1,7 @@
 import sqlite3
 from flask import g
 import os
+from datetime import date, timedelta
 
 # Указываем директорию для базы данных
 DATABASE_DIR = os.getenv("DATABASE_DIR", "/tmp")
@@ -22,8 +23,8 @@ def close_connection(exception):
 def init_db():
     """
     Создаём таблицы:
-    users: хранит (id, name, chat_id)
-    nutrition: хранит приёмы пищи (user_id, food_name, calories, date)
+    users: (id, name, chat_id)
+    nutrition: (id, user_id, food_name, calories, date)
     """
     db = get_db()
     cursor = db.cursor()
@@ -66,14 +67,14 @@ def get_user_by_chat_id(chat_id):
     cursor.execute("SELECT * FROM users WHERE chat_id = ?", (chat_id,))
     return cursor.fetchone()
 
-def add_meal(user_id, food_name, calories, date):
+def add_meal(user_id, food_name, calories, date_str):
     """
     Добавляет запись о приёме пищи для указанного user_id.
     """
     db = get_db()
     cursor = db.cursor()
     cursor.execute("INSERT INTO nutrition (user_id, food_name, calories, date) VALUES (?, ?, ?, ?)",
-                   (user_id, food_name, calories, date))
+                   (user_id, food_name, calories, date_str))
     db.commit()
     return cursor.lastrowid
 
@@ -86,3 +87,29 @@ def get_user_meals(user_id):
     cursor.execute("SELECT * FROM nutrition WHERE user_id = ?", (user_id,))
     rows = cursor.fetchall()
     return [dict(row) for row in rows]
+
+def get_calories_last_7_days(user_id):
+    """
+    Возвращает суммарные калории за последние 7 дней.
+    """
+    db = get_db()
+    cursor = db.cursor()
+
+    today = date.today()
+    seven_days_ago = today - timedelta(days=7)
+
+    today_str = today.isoformat()
+    seven_days_ago_str = seven_days_ago.isoformat()
+
+    cursor.execute("""
+        SELECT SUM(calories) as total_calories
+        FROM nutrition
+        WHERE user_id = ?
+        AND date >= ? AND date <= ?
+    """, (user_id, seven_days_ago_str, today_str))
+
+    row = cursor.fetchone()
+    if row and row["total_calories"] is not None:
+        return row["total_calories"]
+    else:
+        return 0
