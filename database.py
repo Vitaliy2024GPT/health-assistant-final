@@ -88,6 +88,22 @@ def get_user_meals(user_id):
     rows = cursor.fetchall()
     return [dict(row) for row in rows]
 
+def get_meals_last_7_days(user_id):
+    """
+    Возвращает список приёмов пищи за последние 7 дней для данного пользователя.
+    """
+    db = get_db()
+    cursor = db.cursor()
+    today = date.today()
+    seven_days_ago = today - timedelta(days=7)
+    cursor.execute("""
+        SELECT * FROM nutrition
+        WHERE user_id = ?
+        AND date >= ? AND date <= ?
+    """, (user_id, seven_days_ago.isoformat(), today.isoformat()))
+    rows = cursor.fetchall()
+    return [dict(row) for row in rows]
+
 def get_calories_last_7_days(user_id):
     """
     Возвращает суммарные калории за последние 7 дней.
