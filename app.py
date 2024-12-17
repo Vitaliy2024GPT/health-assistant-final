@@ -88,6 +88,10 @@ def google_fit_command(update, context):
     update.message.reply_text(f"Connect Google Fit here: {url_for('authorize', _external=True)}")
 
 # Google OAuth маршруты
+@app.route("/")
+def home():
+    return "Health Assistant API is running! Use /start in Telegram Bot to interact.", 200
+
 @app.route("/authorize")
 def authorize():
     params = {
