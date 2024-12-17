@@ -9,6 +9,9 @@ os.makedirs(DATABASE_DIR, exist_ok=True)
 DATABASE = os.path.join(DATABASE_DIR, "database.db")
 
 def get_db():
+    """
+    Возвращает соединение с базой данных для текущего контекста запроса.
+    """
     db = getattr(g, '_database', None)
     if db is None:
         db = g._database = sqlite3.connect(DATABASE)
@@ -16,15 +19,16 @@ def get_db():
     return db
 
 def close_connection(exception):
+    """
+    Закрывает соединение с базой данных при завершении запроса.
+    """
     db = getattr(g, '_database', None)
     if db is not None:
         db.close()
 
 def init_db():
     """
-    Создаём таблицы:
-    users: (id, name, chat_id)
-    nutrition: (id, user_id, food_name, calories, date)
+    Инициализирует базу данных и создаёт необходимые таблицы.
     """
     db = get_db()
     cursor = db.cursor()
@@ -32,7 +36,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            chat_id INTEGER UNIQUE NOT NULL
+            chat_id INTEGER UNIQUE NOT NULL,
+            google_token TEXT DEFAULT NULL
         )
     ''')
     cursor.execute('''
@@ -50,13 +55,18 @@ def init_db():
 def add_user(name, chat_id):
     """
     Добавляет нового пользователя по имени и chat_id.
-    Возвращает id нового пользователя.
+    Возвращает id нового пользователя или существующего.
     """
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("INSERT INTO users (name, chat_id) VALUES (?, ?)", (name, chat_id))
-    db.commit()
-    return cursor.lastrowid
+    try:
+        cursor.execute("INSERT INTO users (name, chat_id) VALUES (?, ?)", (name, chat_id))
+        db.commit()
+    except sqlite3.IntegrityError:
+        pass  # Игнорируем ошибку, если пользователь уже существует
+    cursor.execute("SELECT id FROM users WHERE chat_id = ?", (chat_id,))
+    user = cursor.fetchone()
+    return user["id"] if user else None
 
 def get_user_by_chat_id(chat_id):
     """
@@ -66,6 +76,25 @@ def get_user_by_chat_id(chat_id):
     cursor = db.cursor()
     cursor.execute("SELECT * FROM users WHERE chat_id = ?", (chat_id,))
     return cursor.fetchone()
+
+def save_google_token(chat_id, token):
+    """
+    Сохраняет или обновляет Google Fit токен для пользователя.
+    """
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("UPDATE users SET google_token = ? WHERE chat_id = ?", (token, chat_id))
+    db.commit()
+
+def get_google_token(chat_id):
+    """
+    Возвращает Google Fit токен пользователя по chat_id.
+    """
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT google_token FROM users WHERE chat_id = ?", (chat_id,))
+    row = cursor.fetchone()
+    return row["google_token"] if row else None
 
 def add_meal(user_id, food_name, calories, date_str):
     """
@@ -110,22 +139,14 @@ def get_calories_last_7_days(user_id):
     """
     db = get_db()
     cursor = db.cursor()
-
     today = date.today()
     seven_days_ago = today - timedelta(days=7)
-
-    today_str = today.isoformat()
-    seven_days_ago_str = seven_days_ago.isoformat()
 
     cursor.execute("""
         SELECT SUM(calories) as total_calories
         FROM nutrition
         WHERE user_id = ?
         AND date >= ? AND date <= ?
-    """, (user_id, seven_days_ago_str, today_str))
-
+    """, (user_id, seven_days_ago.isoformat(), today.isoformat()))
     row = cursor.fetchone()
-    if row and row["total_calories"] is not None:
-        return row["total_calories"]
-    else:
-        return 0
+    return row["total_calories"] if row and row["total_calories"] is not None else 0
