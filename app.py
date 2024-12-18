@@ -125,21 +125,33 @@ def googlefit_command(update, context):
         return
 
     try:
-        # Пример запроса данных Google Fit
+        # Запрос на последние 24 часа
+        import time
+        end_time = int(time.time() * 1000)  # Текущее время в миллисекундах
+        start_time = end_time - (24 * 60 * 60 * 1000)  # За последние 24 часа
+
         response = service.users().dataset().aggregate(
-            userId="me", body={
+            userId="me",
+            body={
                 "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
                 "bucketByTime": {"durationMillis": 86400000},
-                "startTimeMillis": 0,  # Настройте диапазон
-                "endTimeMillis": int(date.today().strftime("%s")) * 1000
-            }
+                "startTimeMillis": start_time,
+                "endTimeMillis": end_time,
+            },
         ).execute()
 
-        steps = response.get("bucket", [])[0]["dataset"][0]["point"][0]["value"][0]["intVal"]
-        update.message.reply_text(f"Your total steps for today: {steps}")
+        # Обработка ответа
+        steps = 0
+        for bucket in response.get("bucket", []):
+            for dataset in bucket.get("dataset", []):
+                for point in dataset.get("point", []):
+                    steps += point["value"][0]["intVal"]
+
+        update.message.reply_text(f"Your total steps for the last 24 hours: {steps}")
     except Exception as e:
         logger.error(f"Error fetching Google Fit data: {e}")
-        update.message.reply_text("Could not retrieve Google Fit data.")
+        update.message.reply_text("Could not retrieve Google Fi
+
 
 # Добавляем обработчики команд
 dispatcher.add_handler(CommandHandler("start", start))
