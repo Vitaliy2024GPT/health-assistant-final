@@ -5,9 +5,7 @@ from flask import Flask, request, jsonify, redirect, session, url_for
 from flask_session import Session
 from telegram import Update
 from telegram.ext import Updater, CommandHandler
-from database import (
-    init_db, close_connection, get_user_by_chat_id, save_google_token
-)
+from database import init_db, close_connection, save_google_token, get_user_by_chat_id
 import requests
 from datetime import datetime, timedelta
 import urllib.parse
@@ -20,8 +18,9 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
 # Настройка Flask-Session
-app.config["SESSION_TYPE"] = "filesystem"
-app.config["SESSION_PERMANENT"] = False
+app.config['SESSION_TYPE'] = 'filesystem'  # Используем файловую систему для сессий
+app.config['SESSION_FILE_DIR'] = '/tmp/flask_sessions'
+app.config['SESSION_PERMANENT'] = False
 Session(app)
 
 # Переменные окружения
@@ -39,10 +38,6 @@ with app.app_context():
     init_db()
 app.teardown_appcontext(close_connection)
 
-# Инициализация Telegram бота
-updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-dispatcher = updater.dispatcher
-
 # Telegram команды
 def start(update, context):
     update.message.reply_text(
@@ -53,13 +48,7 @@ def google_fit_command(update, context):
     chat_id = update.message.chat_id
     session["chat_id"] = chat_id  # Сохраняем chat_id в сессии
     logger.info(f"Chat ID {chat_id} saved in session.")
-    fit_url = url_for('authorize', _external=True)
-    update.message.reply_text(f"Connect Google Fit here: {fit_url}")
-
-# Google OAuth маршруты
-@app.route("/")
-def home():
-    return "Health Assistant API is running!", 200
+    update.message.reply_text(f"Connect Google Fit here: {url_for('authorize', _external=True)}")
 
 @app.route("/authorize")
 def authorize():
@@ -83,7 +72,7 @@ def oauth2callback():
     chat_id = session.get("chat_id")
     if not chat_id:
         logger.error("Chat ID is missing in session during /oauth2callback.")
-        return "Error: Chat ID is missing. Please restart the connection."
+        return "Error: Chat ID is missing. Please restart the connection.", 400
 
     payload = {
         "code": code,
@@ -96,10 +85,15 @@ def oauth2callback():
     if response.ok:
         access_token = response.json().get("access_token")
         save_google_token(chat_id, access_token)  # Сохраняем токен в базе данных
-        logger.info(f"Google Fit token saved for chat ID {chat_id}.")
         return "Google Fit connected successfully!"
-    logger.error(f"Error during Google Fit authorization: {response.text}")
-    return f"Error during authorization: {response.text}", 400
+    logger.error(f"Error during Google OAuth: {response.text}")
+    return "Error during authorization.", 400
+
+# Инициализация Telegram бота
+updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
+dispatcher = updater.dispatcher
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("google_fit", google_fit_command))
 
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
@@ -111,10 +105,6 @@ def telegram_webhook():
     except Exception as e:
         logger.error(f"Error: {e}")
         return jsonify({"error": "failed"}), 500
-
-# Добавление команд
-dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(CommandHandler("google_fit", google_fit_command))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
