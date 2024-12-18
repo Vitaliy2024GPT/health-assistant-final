@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 from flask import Flask, request, jsonify, redirect, session, url_for
+from flask_session import Session
 from telegram import Update
 from telegram.ext import Updater, CommandHandler
 from database import (
@@ -17,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
+
+# Настройка Flask-Session
+app.config["SESSION_TYPE"] = "filesystem"
+app.config["SESSION_PERMANENT"] = False
+Session(app)
 
 # Переменные окружения
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -93,6 +99,7 @@ def fit_data_command(update, context):
 def google_fit_command(update, context):
     chat_id = update.message.chat_id
     session["chat_id"] = chat_id  # Сохраняем chat_id для авторизации
+    logger.info(f"Chat ID {chat_id} saved in session.")
     fit_url = url_for('authorize', _external=True)
     update.message.reply_text(f"Connect Google Fit here: {fit_url}")
 
@@ -105,6 +112,7 @@ def home():
 def authorize():
     chat_id = session.get("chat_id")
     if not chat_id:
+        logger.error("Chat ID is missing in session during /authorize.")
         return "Error: Chat ID is missing. Please restart the connection.", 400
 
     params = {
@@ -121,6 +129,7 @@ def oauth2callback():
     code = request.args.get("code")
     chat_id = session.get("chat_id")
     if not chat_id:
+        logger.error("Chat ID is missing in session during /oauth2callback.")
         return "Error: Chat ID is missing. Please restart the connection."
 
     payload = {
@@ -134,7 +143,9 @@ def oauth2callback():
     if response.ok:
         access_token = response.json().get("access_token")
         save_google_token(chat_id, access_token)  # Сохраняем токен в базе данных
+        logger.info(f"Google Fit token saved for chat ID {chat_id}.")
         return "Google Fit connected successfully!"
+    logger.error(f"Error during Google Fit authorization: {response.text}")
     return f"Error during authorization: {response.text}", 400
 
 @app.route("/telegram_webhook", methods=["POST"])
