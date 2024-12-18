@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import logging
 from flask import Flask, request, jsonify
 from telegram import Update
@@ -45,10 +46,15 @@ dispatcher = updater.dispatcher
 
 # Подключение к Google Fit API
 def google_fit_service():
-    credentials_path = "credentials.json"  # Файл с ключами
+    """Создаёт Google Fit API сервис на основе переменной окружения GOOGLE_CREDENTIALS."""
     try:
-        credentials = service_account.Credentials.from_service_account_file(
-            credentials_path, scopes=["https://www.googleapis.com/auth/fitness.activity.read"]
+        credentials_json = os.getenv("GOOGLE_CREDENTIALS")
+        if not credentials_json:
+            raise ValueError("GOOGLE_CREDENTIALS environment variable not set")
+
+        credentials_info = json.loads(credentials_json)
+        credentials = service_account.Credentials.from_service_account_info(
+            credentials_info, scopes=["https://www.googleapis.com/auth/fitness.activity.read"]
         )
         service = build("fitness", "v1", credentials=credentials)
         return service
