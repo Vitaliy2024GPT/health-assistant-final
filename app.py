@@ -12,6 +12,7 @@ from datetime import date, datetime
 import redis
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+import random
 
 # Настройка логирования
 logging.basicConfig(
@@ -23,17 +24,26 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Инициализация базы данных
-with app.app_context():
-    init_db()
-app.teardown_appcontext(close_connection)
+try:
+    with app.app_context():
+        init_db()
+    app.teardown_appcontext(close_connection)
+    logger.info("Database initialized successfully.")
+except Exception as e:
+    logger.error(f"Database initialization failed: {e}")
+    sys.exit(1)
 
 # Подключение к Redis
-redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-redis_client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
+try:
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis_client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
+    logger.info("Connected to Redis successfully.")
+except Exception as e:
+    logger.error(f"Failed to connect to Redis: {e}")
+    sys.exit(1)
 
 # Telegram токен
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-
 if not TELEGRAM_TOKEN:
     logger.error("TELEGRAM_TOKEN not set")
     sys.exit(1)
@@ -43,23 +53,24 @@ dispatcher: Dispatcher = updater.dispatcher
 
 # Google Fit API подключение
 def google_fit_service():
-    credentials_path = "credentials.json"
     try:
+        credentials_content = os.getenv("GOOGLE_CREDENTIALS")
+        if not credentials_content:
+            raise ValueError("GOOGLE_CREDENTIALS is not set in environment variables")
+
+        with tempfile.NamedTemporaryFile(mode="w+", delete=False) as temp_file:
+            temp_file.write(credentials_content)
+            temp_file_path = temp_file.name
+
         credentials = service_account.Credentials.from_service_account_file(
-            credentials_path, scopes=["https://www.googleapis.com/auth/fitness.activity.read"]
+            temp_file_path, scopes=["https://www.googleapis.com/auth/fitness.activity.read"]
         )
         service = build("fitness", "v1", credentials=credentials)
+        os.remove(temp_file_path)
         return service
     except Exception as e:
         logger.error(f"Failed to connect to Google Fit API: {e}")
         return None
-
-# Функции Redis
-def save_temp_data(key, value, ttl=3600):
-    redis_client.set(key, value, ex=ttl)
-
-def get_temp_data(key):
-    return redis_client.get(key)
 
 # Telegram команды
 def start(update, context):
@@ -109,13 +120,34 @@ def addmeal_command(update, context):
     add_meal(user["id"], food_name, calories, today_str)
     update.message.reply_text(f"Meal added: {food_name}, {calories} kcal")
 
-def googlefit_command(update, context):
+def report_command(update, context):
     chat_id = update.message.chat_id
+    user = get_user_by_chat_id(chat_id)
+    if not user:
+        update.message.reply_text("You are not registered. Use /register <name> first.")
+        return
+
+    stats = get_calories_last_7_days(user["id"])
+    message = "Calories consumed in the last 7 days:\n"
+    for day, calories in stats.items():
+        message += f"{day}: {calories} kcal\n"
+    update.message.reply_text(message)
+
+def diet_advice_command(update, context):
+    tips = [
+        "Drink water before meals to reduce calorie intake.",
+        "Include more protein in your diet to stay full longer.",
+        "Avoid sugary drinks; drink water or unsweetened tea.",
+        "Eat slowly to give your body time to feel full.",
+        "Include vegetables in every meal for fiber and nutrients."
+    ]
+    update.message.reply_text(random.choice(tips))
+
+def googlefit_command(update, context):
     service = google_fit_service()
     if not service:
         update.message.reply_text("Failed to connect to Google Fit API. Try again later.")
         return
-
     try:
         now = datetime.utcnow()
         start_time = int(datetime(now.year, now.month, now.day).timestamp()) * 1000
@@ -129,20 +161,20 @@ def googlefit_command(update, context):
                 "endTimeMillis": end_time
             }
         ).execute()
-
         steps = response.get("bucket", [])[0]["dataset"][0]["point"][0]["value"][0]["intVal"]
         update.message.reply_text(f"Your total steps for today: {steps}")
     except Exception as e:
         logger.error(f"Error fetching Google Fit data: {e}")
         update.message.reply_text("Could not retrieve Google Fit data.")
 
-# Обработчики команд
+# Обработчики
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("register", register_command))
 dispatcher.add_handler(CommandHandler("addmeal", addmeal_command))
+dispatcher.add_handler(CommandHandler("report", report_command))
+dispatcher.add_handler(CommandHandler("diet_advice", diet_advice_command))
 dispatcher.add_handler(CommandHandler("googlefit", googlefit_command))
 
-# Flask маршрут для Telegram webhook
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
     try:
@@ -155,15 +187,11 @@ def telegram_webhook():
         logger.error(f"Error handling webhook: {e}")
         return jsonify({"error": "Failed to process webhook"}), 500
 
-# Запуск Flask и Telegram бота
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info("Starting Flask application...")
 
-    # Запуск Flask
     from threading import Thread
     Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": port}).start()
-
-    # Запуск Telegram бота
     updater.start_polling()
     updater.idle()
