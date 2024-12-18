@@ -43,62 +43,15 @@ app.teardown_appcontext(close_connection)
 updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
 dispatcher = updater.dispatcher
 
-# Получение данных из Google Fit
-def get_google_fit_data(access_token):
-    try:
-        headers = {"Authorization": f"Bearer {access_token}"}
-        end_time = datetime.utcnow()
-        start_time = end_time - timedelta(days=1)
-        start_time_ns = int(start_time.timestamp()) * 1000000000
-        end_time_ns = int(end_time.timestamp()) * 1000000000
-
-        url = "https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate"
-        payload = {
-            "aggregateBy": [{"dataTypeName": "com.google.calories.expended"}],
-            "bucketByTime": {"durationMillis": 86400000},
-            "startTimeMillis": start_time_ns // 1000000,
-            "endTimeMillis": end_time_ns // 1000000
-        }
-        response = requests.post(url, json=payload, headers=headers)
-        if response.ok:
-            data = response.json()
-            calories = sum(value.get('fpVal', 0)
-                           for bucket in data.get('bucket', [])
-                           for dataset in bucket.get('dataset', [])
-                           for point in dataset.get('point', [])
-                           for value in point.get('value', []))
-            return round(calories, 2)
-        else:
-            logger.error(f"Error fetching Google Fit data: {response.text}")
-            return None
-    except Exception as e:
-        logger.error(f"Exception: {e}")
-        return None
-
 # Telegram команды
 def start(update, context):
     update.message.reply_text(
         "Welcome to Health Assistant Bot!\nUse /google_fit to connect Google Fit."
     )
 
-def fit_data_command(update, context):
-    chat_id = update.message.chat_id
-    user = get_user_by_chat_id(chat_id)
-    access_token = user.get("google_token") if user else None
-
-    if not access_token:
-        update.message.reply_text("Google Fit is not connected. Use /google_fit to connect.")
-        return
-
-    calories = get_google_fit_data(access_token)
-    if calories is not None:
-        update.message.reply_text(f"Calories burned in the last 24 hours: {calories} kcal.")
-    else:
-        update.message.reply_text("Failed to fetch data. Try again later.")
-
 def google_fit_command(update, context):
     chat_id = update.message.chat_id
-    session["chat_id"] = chat_id  # Сохраняем chat_id для авторизации
+    session["chat_id"] = chat_id  # Сохраняем chat_id в сессии
     logger.info(f"Chat ID {chat_id} saved in session.")
     fit_url = url_for('authorize', _external=True)
     update.message.reply_text(f"Connect Google Fit here: {fit_url}")
@@ -106,7 +59,7 @@ def google_fit_command(update, context):
 # Google OAuth маршруты
 @app.route("/")
 def home():
-    return "Health Assistant API is running! Use /start in Telegram Bot to interact.", 200
+    return "Health Assistant API is running!", 200
 
 @app.route("/authorize")
 def authorize():
@@ -162,7 +115,6 @@ def telegram_webhook():
 # Добавление команд
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("google_fit", google_fit_command))
-dispatcher.add_handler(CommandHandler("fit_data", fit_data_command))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
