@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 import logging
 from flask import Flask, request, jsonify
 from telegram import Update
@@ -46,15 +45,13 @@ dispatcher = updater.dispatcher
 
 # Подключение к Google Fit API
 def google_fit_service():
-    """Создаёт Google Fit API сервис на основе переменной окружения GOOGLE_CREDENTIALS."""
     try:
         credentials_json = os.getenv("GOOGLE_CREDENTIALS")
         if not credentials_json:
             raise ValueError("GOOGLE_CREDENTIALS environment variable not set")
-
-        credentials_info = json.loads(credentials_json)
         credentials = service_account.Credentials.from_service_account_info(
-            credentials_info, scopes=["https://www.googleapis.com/auth/fitness.activity.read"]
+            eval(credentials_json),
+            scopes=["https://www.googleapis.com/auth/fitness.activity.read"]
         )
         service = build("fitness", "v1", credentials=credentials)
         return service
@@ -125,10 +122,9 @@ def googlefit_command(update, context):
         return
 
     try:
-        # Запрос на последние 24 часа
         import time
-        end_time = int(time.time() * 1000)  # Текущее время в миллисекундах
-        start_time = end_time - (24 * 60 * 60 * 1000)  # За последние 24 часа
+        end_time = int(time.time() * 1000)
+        start_time = end_time - (24 * 60 * 60 * 1000)
 
         response = service.users().dataset().aggregate(
             userId="me",
@@ -137,10 +133,9 @@ def googlefit_command(update, context):
                 "bucketByTime": {"durationMillis": 86400000},
                 "startTimeMillis": start_time,
                 "endTimeMillis": end_time,
-            },
+            }
         ).execute()
 
-        # Обработка ответа
         steps = 0
         for bucket in response.get("bucket", []):
             for dataset in bucket.get("dataset", []):
@@ -150,8 +145,7 @@ def googlefit_command(update, context):
         update.message.reply_text(f"Your total steps for the last 24 hours: {steps}")
     except Exception as e:
         logger.error(f"Error fetching Google Fit data: {e}")
-        update.message.reply_text("Could not retrieve Google Fi
-
+        update.message.reply_text("Could not retrieve Google Fit data. Please try again later.")
 
 # Добавляем обработчики команд
 dispatcher.add_handler(CommandHandler("start", start))
