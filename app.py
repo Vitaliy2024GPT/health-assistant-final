@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Updater, CommandHandler, Dispatcher
 from database import (
     init_db, close_connection, add_user, get_user_by_chat_id,
-    add_meal, get_meals_last_7_days, get_calories_last_7_days
+    add_meal, get_user_meals, get_meals_last_7_days, get_calories_last_7_days
 )
 from datetime import date, datetime
 import redis
@@ -71,7 +71,15 @@ def get_temp_data(key):
 
 # Telegram команды
 def start(update, context):
-    update.message.reply_text("Welcome to Health Assistant Bot!\nUse /register <name> to create an account.")
+    update.message.reply_text(
+        "Welcome to Health Assistant Bot!\n"
+        "Use /register <name> to create an account.\n"
+        "Then /addmeal <food> <calories> to log meals.\n"
+        "Use /meals to see all meals.\n"
+        "/report to see weekly calories stats.\n"
+        "/diet_advice for a simple diet tip!\n"
+        "/googlefit to get data from Google Fit API."
+    )
 
 def report_command(update, context):
     chat_id = update.message.chat_id
@@ -92,9 +100,36 @@ def report_command(update, context):
         logger.error(f"Error generating report: {e}")
         update.message.reply_text("Error generating report.")
 
+def googlefit_command(update, context):
+    service = google_fit_service()
+    if not service:
+        update.message.reply_text("Failed to connect to Google Fit API. Try again later.")
+        return
+
+    try:
+        now = datetime.utcnow()
+        start_time = int(datetime(now.year, now.month, now.day).timestamp()) * 1000
+        end_time = int(datetime.utcnow().timestamp()) * 1000
+
+        response = service.users().dataset().aggregate(
+            userId="me", body={
+                "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
+                "bucketByTime": {"durationMillis": 86400000},
+                "startTimeMillis": start_time,
+                "endTimeMillis": end_time
+            }
+        ).execute()
+
+        steps = response.get("bucket", [])[0]["dataset"][0]["point"][0]["value"][0]["intVal"]
+        update.message.reply_text(f"Your total steps for today: {steps}")
+    except Exception as e:
+        logger.error(f"Error fetching Google Fit data: {e}")
+        update.message.reply_text("Could not retrieve Google Fit data.")
+
 # Обработчики команд
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("report", report_command))
+dispatcher.add_handler(CommandHandler("googlefit", googlefit_command))
 
 # Flask маршрут для Telegram webhook
 @app.route("/telegram_webhook", methods=["POST"])
