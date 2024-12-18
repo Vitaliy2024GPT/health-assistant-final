@@ -1,85 +1,176 @@
 import os
+import sys
 import logging
-from flask import Flask, request, redirect, session, url_for
-from flask_session import Session
-from redis import Redis
+from flask import Flask, request, jsonify
+from telegram import Update
 from telegram.ext import Updater, CommandHandler
-from database import save_google_token, get_user_by_chat_id
+from database import init_db, close_connection, add_user, get_user_by_chat_id, add_meal, get_user_meals, get_meals_last_7_days, get_calories_last_7_days
+from datetime import date
+import redis
+
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Конфигурация Flask
-app.secret_key = os.urandom(24)
-app.config['SESSION_TYPE'] = 'redis'
-app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_USE_SIGNER'] = True
-app.config['SESSION_KEY_PREFIX'] = 'health_assistant:'
-app.config['SESSION_REDIS'] = Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+# Инициализируем базу данных при старте приложения
+with app.app_context():
+    init_db()
 
-# Активируем сессии
-Session(app)
+# Регистрируем функцию для закрытия соединения с БД после обработки запроса
+app.teardown_appcontext(close_connection)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Подключение к Redis
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis_client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
 
+# Telegram токен из переменных окружения
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-REDIRECT_URI = "https://health-assistant-final.onrender.com/oauth2callback"
 
+if not TELEGRAM_TOKEN:
+    logger.error("TELEGRAM_TOKEN not set")
+    sys.exit(1)
+
+# Инициализация Telegram бота
 updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
 dispatcher = updater.dispatcher
 
+# Функции работы с Redis
+def save_temp_data(key, value, ttl=3600):
+    """Сохранение временных данных в Redis."""
+    redis_client.set(key, value, ex=ttl)
+
+def get_temp_data(key):
+    """Получение временных данных из Redis."""
+    return redis_client.get(key)
+
+# Обработчики Telegram команд
 def start(update, context):
-    update.message.reply_text("Welcome! Use /google_fit to connect Google Fit.")
+    update.message.reply_text(
+        "Welcome to Health Assistant Bot!\n"
+        "Use /register <name> to create an account.\n"
+        "Then /addmeal <food> <calories> to log meals.\n"
+        "Use /meals to see all meals.\n"
+        "/report to see weekly calories stats.\n"
+        "/diet_advice for a simple diet tip!"
+    )
 
-def google_fit_command(update, context):
+def register_command(update, context):
+    if len(context.args) < 1:
+        update.message.reply_text("Usage: /register <name>")
+        return
+    name = context.args[0]
     chat_id = update.message.chat_id
-    session["chat_id"] = chat_id
-    update.message.reply_text(f"Authorize here: {url_for('authorize', _external=True)}")
 
-@app.route("/authorize")
-def authorize():
-    chat_id = session.get("chat_id")
-    if not chat_id:
-        return "Error: Chat ID is missing. Please restart the connection.", 400
+    user = get_user_by_chat_id(chat_id)
+    if user:
+        update.message.reply_text(f"You are already registered as {user['name']}.")
+    else:
+        user_id = add_user(name, chat_id)
+        update.message.reply_text(f"User registered! ID: {user_id} for this chat.")
 
-    return redirect(
-        f"https://accounts.google.com/o/oauth2/v2/auth?"
-        f"client_id={GOOGLE_CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=https://www.googleapis.com/auth/fitness.activity.read"
-    )
+def addmeal_command(update, context):
+    if len(context.args) < 2:
+        update.message.reply_text("Usage: /addmeal food_name calories")
+        return
 
-@app.route("/oauth2callback")
-def oauth2callback():
-    code = request.args.get("code")
-    chat_id = session.get("chat_id")
-    if not chat_id:
-        return "Error: Chat ID is missing. Please restart the connection.", 400
+    chat_id = update.message.chat_id
+    user = get_user_by_chat_id(chat_id)
+    if not user:
+        update.message.reply_text("You are not registered. Use /register <name> first.")
+        return
 
-    response = requests.post(
-        "https://oauth2.googleapis.com/token",
-        data={
-            "code": code,
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
-            "redirect_uri": REDIRECT_URI,
-            "grant_type": "authorization_code"
-        }
-    )
-    if response.ok:
-        save_google_token(chat_id, response.json().get("access_token"))
-        return "Google Fit connected successfully!"
-    return "Error during authorization.", 400
+    food_name = context.args[0]
+    try:
+        calories = int(context.args[1])
+    except ValueError:
+        update.message.reply_text("Calories must be a number.")
+        return
 
+    today_str = date.today().isoformat()
+    add_meal(user["id"], food_name, calories, today_str)
+    update.message.reply_text(f"Meal added: {food_name}, {calories} kcal")
+
+def meals_command(update, context):
+    chat_id = update.message.chat_id
+    user = get_user_by_chat_id(chat_id)
+    if not user:
+        update.message.reply_text("You are not registered. Use /register <name> first.")
+        return
+
+    meals = get_user_meals(user["id"])
+    if not meals:
+        update.message.reply_text("No meals found.")
+    else:
+        lines = [f"{m['date']}: {m['food_name']} - {m['calories']} kcal" for m in meals]
+        update.message.reply_text("\n".join(lines))
+
+def report_command(update, context):
+    """
+    Показывает суммарные калории за последние 7 дней и средние калории в день.
+    """
+    chat_id = update.message.chat_id
+    user = get_user_by_chat_id(chat_id)
+    if not user:
+        update.message.reply_text("You are not registered. Use /register <name> first.")
+        return
+
+    total_cal = get_calories_last_7_days(user["id"])
+    avg_cal = total_cal / 7.0
+    update.message.reply_text(f"Last 7 days total: {total_cal} kcal\nAverage per day: {avg_cal:.2f} kcal")
+
+def diet_advice_command(update, context):
+    """
+    Простой совет диетолога на основе среднего потребления калорий за последние 7 дней.
+    """
+    chat_id = update.message.chat_id
+    user = get_user_by_chat_id(chat_id)
+    if not user:
+        update.message.reply_text("You are not registered. Use /register <name> first.")
+        return
+
+    meals_7_days = get_meals_last_7_days(user["id"])
+    if not meals_7_days:
+        update.message.reply_text("No recent meal data found to analyze. Add some meals first.")
+        return
+
+    total_cal = sum(m['calories'] for m in meals_7_days)
+    avg_cal = total_cal / 7.0
+
+    if avg_cal > 3000:
+        advice = "You consume quite a lot of calories. Try reducing portion sizes or replacing sugary snacks with fruits."
+    elif avg_cal < 1500:
+        advice = "Your calorie intake is quite low. Consider adding more nutritious meals."
+    else:
+        advice = "Your average calorie intake seems moderate. Keep it balanced!"
+
+    update.message.reply_text(f"Average daily calories (last 7 days): {avg_cal:.2f} kcal\nAdvice: {advice}")
+
+# Добавляем обработчики команд
 dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(CommandHandler("google_fit", google_fit_command))
+dispatcher.add_handler(CommandHandler("register", register_command))
+dispatcher.add_handler(CommandHandler("addmeal", addmeal_command))
+dispatcher.add_handler(CommandHandler("meals", meals_command))
+dispatcher.add_handler(CommandHandler("report", report_command))
+dispatcher.add_handler(CommandHandler("diet_advice", diet_advice_command))
 
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
-    data = request.get_json()
-    update = telegram.Update.de_json(data, updater.bot)
-    dispatcher.process_update(update)
-    return "OK"
+    try:
+        data = request.get_json(force=True)
+        logger.info(f"Webhook received data: {data}")
+        update = Update.de_json(data, updater.bot)
+        dispatcher.process_update(update)
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        logger.error(f"Error handling webhook: {e}")
+        return jsonify({"error": "Failed to process webhook"}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    port = int(os.environ.get("PORT", 5000))
+    logger.info("Starting Flask application...")
+    app.run(host="0.0.0.0", port=port)
