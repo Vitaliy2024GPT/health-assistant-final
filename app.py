@@ -93,7 +93,8 @@ def fit_data_command(update, context):
 def google_fit_command(update, context):
     chat_id = update.message.chat_id
     session["chat_id"] = chat_id  # Сохраняем chat_id для авторизации
-    update.message.reply_text(f"Connect Google Fit here: {url_for('authorize', _external=True)}")
+    fit_url = url_for('authorize', _external=True)
+    update.message.reply_text(f"Connect Google Fit here: {fit_url}")
 
 # Google OAuth маршруты
 @app.route("/")
@@ -102,6 +103,10 @@ def home():
 
 @app.route("/authorize")
 def authorize():
+    chat_id = session.get("chat_id")
+    if not chat_id:
+        return "Error: Chat ID is missing. Please restart the connection.", 400
+
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
@@ -130,7 +135,7 @@ def oauth2callback():
         access_token = response.json().get("access_token")
         save_google_token(chat_id, access_token)  # Сохраняем токен в базе данных
         return "Google Fit connected successfully!"
-    return "Error during authorization."
+    return f"Error during authorization: {response.text}", 400
 
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
