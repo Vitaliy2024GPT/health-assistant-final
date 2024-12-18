@@ -4,9 +4,14 @@ import logging
 from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Updater, CommandHandler
-from database import init_db, close_connection, add_user, get_user_by_chat_id, add_meal, get_user_meals, get_meals_last_7_days, get_calories_last_7_days
+from database import (
+    init_db, close_connection, add_user, get_user_by_chat_id,
+    add_meal, get_user_meals, get_meals_last_7_days, get_calories_last_7_days
+)
 from datetime import date
 import redis
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
 # Настройка логирования
 logging.basicConfig(
@@ -17,11 +22,10 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Инициализируем базу данных при старте приложения
+# Инициализация базы данных при старте приложения
 with app.app_context():
     init_db()
 
-# Регистрируем функцию для закрытия соединения с БД после обработки запроса
 app.teardown_appcontext(close_connection)
 
 # Подключение к Redis
@@ -39,16 +43,27 @@ if not TELEGRAM_TOKEN:
 updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
 dispatcher = updater.dispatcher
 
+# Подключение к Google Fit API
+def google_fit_service():
+    credentials_path = "credentials.json"  # Файл с ключами
+    try:
+        credentials = service_account.Credentials.from_service_account_file(
+            credentials_path, scopes=["https://www.googleapis.com/auth/fitness.activity.read"]
+        )
+        service = build("fitness", "v1", credentials=credentials)
+        return service
+    except Exception as e:
+        logger.error(f"Failed to connect to Google Fit API: {e}")
+        return None
+
 # Функции работы с Redis
 def save_temp_data(key, value, ttl=3600):
-    """Сохранение временных данных в Redis."""
     redis_client.set(key, value, ex=ttl)
 
 def get_temp_data(key):
-    """Получение временных данных из Redis."""
     return redis_client.get(key)
 
-# Обработчики Telegram команд
+# Telegram команды
 def start(update, context):
     update.message.reply_text(
         "Welcome to Health Assistant Bot!\n"
@@ -56,7 +71,8 @@ def start(update, context):
         "Then /addmeal <food> <calories> to log meals.\n"
         "Use /meals to see all meals.\n"
         "/report to see weekly calories stats.\n"
-        "/diet_advice for a simple diet tip!"
+        "/diet_advice for a simple diet tip!\n"
+        "/googlefit to get data from Google Fit API."
     )
 
 def register_command(update, context):
@@ -95,68 +111,35 @@ def addmeal_command(update, context):
     add_meal(user["id"], food_name, calories, today_str)
     update.message.reply_text(f"Meal added: {food_name}, {calories} kcal")
 
-def meals_command(update, context):
+def googlefit_command(update, context):
     chat_id = update.message.chat_id
-    user = get_user_by_chat_id(chat_id)
-    if not user:
-        update.message.reply_text("You are not registered. Use /register <name> first.")
+    service = google_fit_service()
+    if not service:
+        update.message.reply_text("Failed to connect to Google Fit API. Try again later.")
         return
 
-    meals = get_user_meals(user["id"])
-    if not meals:
-        update.message.reply_text("No meals found.")
-    else:
-        lines = [f"{m['date']}: {m['food_name']} - {m['calories']} kcal" for m in meals]
-        update.message.reply_text("\n".join(lines))
+    try:
+        # Пример запроса данных Google Fit
+        response = service.users().dataset().aggregate(
+            userId="me", body={
+                "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
+                "bucketByTime": {"durationMillis": 86400000},
+                "startTimeMillis": 0,  # Настройте диапазон
+                "endTimeMillis": int(date.today().strftime("%s")) * 1000
+            }
+        ).execute()
 
-def report_command(update, context):
-    """
-    Показывает суммарные калории за последние 7 дней и средние калории в день.
-    """
-    chat_id = update.message.chat_id
-    user = get_user_by_chat_id(chat_id)
-    if not user:
-        update.message.reply_text("You are not registered. Use /register <name> first.")
-        return
-
-    total_cal = get_calories_last_7_days(user["id"])
-    avg_cal = total_cal / 7.0
-    update.message.reply_text(f"Last 7 days total: {total_cal} kcal\nAverage per day: {avg_cal:.2f} kcal")
-
-def diet_advice_command(update, context):
-    """
-    Простой совет диетолога на основе среднего потребления калорий за последние 7 дней.
-    """
-    chat_id = update.message.chat_id
-    user = get_user_by_chat_id(chat_id)
-    if not user:
-        update.message.reply_text("You are not registered. Use /register <name> first.")
-        return
-
-    meals_7_days = get_meals_last_7_days(user["id"])
-    if not meals_7_days:
-        update.message.reply_text("No recent meal data found to analyze. Add some meals first.")
-        return
-
-    total_cal = sum(m['calories'] for m in meals_7_days)
-    avg_cal = total_cal / 7.0
-
-    if avg_cal > 3000:
-        advice = "You consume quite a lot of calories. Try reducing portion sizes or replacing sugary snacks with fruits."
-    elif avg_cal < 1500:
-        advice = "Your calorie intake is quite low. Consider adding more nutritious meals."
-    else:
-        advice = "Your average calorie intake seems moderate. Keep it balanced!"
-
-    update.message.reply_text(f"Average daily calories (last 7 days): {avg_cal:.2f} kcal\nAdvice: {advice}")
+        steps = response.get("bucket", [])[0]["dataset"][0]["point"][0]["value"][0]["intVal"]
+        update.message.reply_text(f"Your total steps for today: {steps}")
+    except Exception as e:
+        logger.error(f"Error fetching Google Fit data: {e}")
+        update.message.reply_text("Could not retrieve Google Fit data.")
 
 # Добавляем обработчики команд
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("register", register_command))
 dispatcher.add_handler(CommandHandler("addmeal", addmeal_command))
-dispatcher.add_handler(CommandHandler("meals", meals_command))
-dispatcher.add_handler(CommandHandler("report", report_command))
-dispatcher.add_handler(CommandHandler("diet_advice", diet_advice_command))
+dispatcher.add_handler(CommandHandler("googlefit", googlefit_command))
 
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
