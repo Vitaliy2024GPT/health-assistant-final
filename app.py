@@ -13,6 +13,7 @@ from datetime import date, datetime
 import redis
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from threading import Thread
 
 # Настройка логирования
 logging.basicConfig(
@@ -141,7 +142,10 @@ def googlefit_command(update, context):
             update.message.reply_text("No step data found for today.")
             return
 
-        steps = buckets[0]["dataset"][0]["point"][0]["value"][0]["intVal"]
+        steps = sum(
+            bucket["dataset"][0]["point"][0]["value"][0]["intVal"]
+            for bucket in buckets if bucket["dataset"]
+        )
         update.message.reply_text(f"Your total steps for today: {steps}")
     except Exception as e:
         logger.error(f"Error fetching Google Fit data: {e}")
@@ -170,7 +174,14 @@ def telegram_webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info("Starting Flask application...")
-    from threading import Thread
-    Thread(target=app.run, kwargs={"host": "0.0.0.0", "port": port}).start()
+
+    def run_flask():
+        try:
+            app.run(host="0.0.0.0", port=port)
+        except Exception as e:
+            logger.error(f"Flask server encountered an error: {e}")
+            sys.exit(1)
+
+    Thread(target=run_flask).start()
     updater.start_polling()
     updater.idle()
