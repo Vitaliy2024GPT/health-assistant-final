@@ -81,6 +81,22 @@ def start(update, context):
         "/googlefit to get data from Google Fit API."
     )
 
+def help_command(update, context):
+    update.message.reply_text(
+        "Available commands:\n"
+        "/start - Introduction to the bot\n"
+        "/register <name> - Register your account\n"
+        "/addmeal <food> <calories> - Log a meal\n"
+        "/meals - View all logged meals\n"
+        "/report - Get weekly calorie report\n"
+        "/diet_advice - Receive a diet tip\n"
+        "/googlefit - Fetch step data from Google Fit"
+    )
+
+def diet_advice(update, context):
+    advice = "Drink water before meals to reduce hunger and improve digestion."
+    update.message.reply_text(advice)
+
 def report_command(update, context):
     chat_id = update.message.chat_id
     user = get_user_by_chat_id(chat_id)
@@ -120,7 +136,12 @@ def googlefit_command(update, context):
             }
         ).execute()
 
-        steps = response.get("bucket", [])[0]["dataset"][0]["point"][0]["value"][0]["intVal"]
+        buckets = response.get("bucket", [])
+        if not buckets:
+            update.message.reply_text("No step data found for today.")
+            return
+
+        steps = buckets[0]["dataset"][0]["point"][0]["value"][0]["intVal"]
         update.message.reply_text(f"Your total steps for today: {steps}")
     except Exception as e:
         logger.error(f"Error fetching Google Fit data: {e}")
@@ -128,6 +149,8 @@ def googlefit_command(update, context):
 
 # Обработчики команд
 dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("help", help_command))
+dispatcher.add_handler(CommandHandler("diet_advice", diet_advice))
 dispatcher.add_handler(CommandHandler("report", report_command))
 dispatcher.add_handler(CommandHandler("googlefit", googlefit_command))
 
