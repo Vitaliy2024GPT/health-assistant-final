@@ -4,7 +4,7 @@ import logging
 import tempfile
 from flask import Flask, request, jsonify, redirect
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, Dispatcher
+from telegram.ext import Updater, CommandHandler, Dispatcher, CallbackContext
 from database import (
     init_db, close_connection, add_user, get_user_by_chat_id,
     add_meal, get_user_meals, get_meals_last_7_days, get_calories_last_7_days
@@ -72,7 +72,7 @@ def get_temp_data(key):
     return redis_client.get(key)
 
 # === TELEGRAM КОМАНДЫ ===
-def start(update, context):
+def start(update: Update, context: CallbackContext):
     update.message.reply_text(
         "Welcome to Health Assistant Bot!\n"
         "Use /register <name> to create an account.\n"
@@ -83,7 +83,7 @@ def start(update, context):
         "/googlefit to get data from Google Fit API."
     )
 
-def help_command(update, context):
+def help_command(update: Update, context: CallbackContext):
     update.message.reply_text(
         "Available commands:\n"
         "/start - Introduction to the bot\n"
@@ -95,11 +95,11 @@ def help_command(update, context):
         "/googlefit - Fetch step data from Google Fit"
     )
 
-def diet_advice(update, context):
+def diet_advice(update: Update, context: CallbackContext):
     advice = "Drink water before meals to reduce hunger and improve digestion."
     update.message.reply_text(advice)
 
-def report_command(update, context):
+def report_command(update: Update, context: CallbackContext):
     chat_id = update.message.chat_id
     user = get_user_by_chat_id(chat_id)
     if not user:
@@ -118,7 +118,7 @@ def report_command(update, context):
         logger.error(f"Error generating report: {e}")
         update.message.reply_text("Error generating report.")
 
-def google_auth(update, context):
+def google_auth(update: Update, context: CallbackContext):
     auth_link = "https://health-assistant-final.onrender.com/google_auth"
     update.message.reply_text(
         f"Please authorize the bot to access your Google Fit account: [Authorize Here]({auth_link})",
@@ -153,5 +153,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"Starting Flask application on port {port}")
     Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
-    updater.start_polling()
+    updater.start_webhook(listen='0.0.0.0', port=port, url_path='/telegram_webhook')
     updater.idle()
