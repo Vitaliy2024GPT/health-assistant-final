@@ -15,34 +15,35 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from threading import Thread
 
-# Настройка логирования
+# === ЛОГИРОВАНИЕ ===
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+# === ИНИЦИАЛИЗАЦИЯ FLASK ===
 app = Flask(__name__)
 
-# Инициализация базы данных
+# === ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ===
 with app.app_context():
     init_db()
 app.teardown_appcontext(close_connection)
 
-# Подключение к Redis
+# === ПОДКЛЮЧЕНИЕ К REDIS ===
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client = redis.StrictRedis.from_url(redis_url, decode_responses=True)
 
-# Telegram токен
+# === ПОДКЛЮЧЕНИЕ К TELEGRAM ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TELEGRAM_TOKEN:
-    logger.error("TELEGRAM_TOKEN not set")
+    logger.error("TELEGRAM_TOKEN is not set")
     sys.exit(1)
 
 updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
 dispatcher: Dispatcher = updater.dispatcher
 
-# Google Fit API подключение
+# === GOOGLE FIT API ===
 def google_fit_service():
     try:
         credentials_content = os.getenv("GOOGLE_CREDENTIALS")
@@ -62,14 +63,14 @@ def google_fit_service():
         logger.error(f"Failed to connect to Google Fit API: {e}")
         return None
 
-# Функции Redis
+# === REDIS ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 def save_temp_data(key, value, ttl=3600):
     redis_client.set(key, value, ex=ttl)
 
 def get_temp_data(key):
     return redis_client.get(key)
 
-# Telegram команды
+# === TELEGRAM КОМАНДЫ ===
 def start(update, context):
     update.message.reply_text(
         "Welcome to Health Assistant Bot!\n"
@@ -147,7 +148,14 @@ def googlefit_command(update, context):
         logger.error(f"Error fetching Google Fit data: {e}")
         update.message.reply_text("Could not retrieve Google Fit data.")
 
-# Flask маршрут для Telegram webhook
+# === ОБРАБОТЧИКИ КОМАНД ===
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("help", help_command))
+dispatcher.add_handler(CommandHandler("diet_advice", diet_advice))
+dispatcher.add_handler(CommandHandler("report", report_command))
+dispatcher.add_handler(CommandHandler("googlefit", googlefit_command))
+
+# === ВЕБХУК ДЛЯ TELEGRAM ===
 @app.route("/telegram_webhook", methods=["POST"])
 def telegram_webhook():
     try:
@@ -159,8 +167,10 @@ def telegram_webhook():
         logger.error(f"Error handling webhook: {e}")
         return jsonify({"error": "Failed to process webhook"}), 500
 
+# === ЗАПУСК ПРИЛОЖЕНИЯ ===
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    logger.info(f"Starting Flask application on port {port}")
     Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
     updater.start_polling()
     updater.idle()
