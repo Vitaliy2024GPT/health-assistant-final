@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 import tempfile
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, Dispatcher
 from database import (
@@ -14,6 +14,7 @@ import redis
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from threading import Thread
+import requests
 
 # === ЛОГИРОВАНИЕ ===
 logging.basicConfig(
@@ -117,36 +118,29 @@ def report_command(update, context):
         logger.error(f"Error generating report: {e}")
         update.message.reply_text("Error generating report.")
 
-def googlefit_command(update, context):
-    service = google_fit_service()
-    if not service:
-        update.message.reply_text("Failed to connect to Google Fit API. Try again later.")
-        return
+def google_auth(update, context):
+    auth_link = "https://health-assistant-final.onrender.com/google_auth"
+    update.message.reply_text(
+        f"Please authorize the bot to access your Google Fit account: [Authorize Here]({auth_link})",
+        parse_mode="Markdown"
+    )
 
-    try:
-        now = datetime.utcnow()
-        start_time = int(datetime(now.year, now.month, now.day).timestamp()) * 1000
-        end_time = int(datetime.utcnow().timestamp()) * 1000
-
-        response = service.users().dataset().aggregate(
-            userId="me", body={
-                "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
-                "bucketByTime": {"durationMillis": 86400000},
-                "startTimeMillis": start_time,
-                "endTimeMillis": end_time
-            }
-        ).execute()
-
-        buckets = response.get("bucket", [])
-        steps = sum(
-            point.get("value", [{}])[0].get("intVal", 0)
-            for bucket in buckets for data in bucket.get("dataset", [])
-            for point in data.get("point", [])
-        )
-        update.message.reply_text(f"Your total steps for today: {steps}")
-    except Exception as e:
-        logger.error(f"Error fetching Google Fit data: {e}")
-        update.message.reply_text("Could not retrieve Google Fit data.")
+def google_callback():
+    code = request.args.get("code")
+    if not code:
+        return "Authorization failed. No code received."
+    
+    token_url = "https://oauth2.googleapis.com/token"
+    data = {
+        "code": code,
+        "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+        "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+        "redirect_uri": "https://health-assistant-final.onrender.com/google_callback",
+        "grant_type": "authorization_code"
+    }
+    response = requests.post(token_url, data=data).json()
+    save_temp_data("google_access_token", response.get("access_token"))
+    return "Google Fit authorization successful."
 
 # === ОБРАБОТЧИКИ КОМАНД ===
 dispatcher.add_handler(CommandHandler("start", start))
@@ -154,18 +148,7 @@ dispatcher.add_handler(CommandHandler("help", help_command))
 dispatcher.add_handler(CommandHandler("diet_advice", diet_advice))
 dispatcher.add_handler(CommandHandler("report", report_command))
 dispatcher.add_handler(CommandHandler("googlefit", googlefit_command))
-
-# === ВЕБХУК ДЛЯ TELEGRAM ===
-@app.route("/telegram_webhook", methods=["POST"])
-def telegram_webhook():
-    try:
-        data = request.get_json(force=True)
-        update = Update.de_json(data, updater.bot)
-        dispatcher.process_update(update)
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        logger.error(f"Error handling webhook: {e}")
-        return jsonify({"error": "Failed to process webhook"}), 500
+dispatcher.add_handler(CommandHandler("googleauth", google_auth))
 
 # === ЗАПУСК ПРИЛОЖЕНИЯ ===
 if __name__ == "__main__":
