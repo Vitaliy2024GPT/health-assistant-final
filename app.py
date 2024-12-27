@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 import json
-from flask import Flask, request, jsonify, redirect, url_for
+from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, Dispatcher, CallbackContext
 from database import (
@@ -116,8 +116,12 @@ def addmeal(update: Update, context: CallbackContext):
         update.message.reply_text("Usage: /addmeal <food> <calories>")
         return
 
-    food = context.args[0]
-    calories = context.args[1]
+    try:
+        food = context.args[0]
+        calories = int(context.args[1])
+    except ValueError:
+        update.message.reply_text("Please provide valid numeric value for calories.")
+        return
 
     add_meal(chat_id, food, calories)
     update.message.reply_text(f"Meal '{food}' with {calories} calories added!")
@@ -183,8 +187,4 @@ dispatcher.add_handler(CommandHandler("googlefit", googlefit))
 
 # === ЗАПУСК ПРИЛОЖЕНИЯ ===
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    logger.info(f"Starting Flask application on port {port}")
-    Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
-    updater.bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/telegram_webhook")
-    updater.idle()
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
