@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 import json
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, Dispatcher, CallbackContext
 from database import (
@@ -76,6 +76,7 @@ def start(update: Update, context: CallbackContext):
         "/meals to view your meals.\n"
         "/report to see weekly calories stats.\n"
         "/diet_advice for a diet tip.\n"
+        "/googleauth to authorize Google Fit.\n"
         "/googlefit to get data from Google Fit API."
     )
 
@@ -88,6 +89,7 @@ def help_command(update: Update, context: CallbackContext):
         "/meals - View meals\n"
         "/report - Weekly report\n"
         "/diet_advice - Diet tip\n"
+        "/googleauth - Google Fit authorization\n"
         "/googlefit - Google Fit data"
     )
 
@@ -140,33 +142,26 @@ def report(update: Update, context: CallbackContext):
     response = "\n".join(f"{day}: {calories} kcal" for day, calories in stats.items())
     update.message.reply_text(response)
 
+def googleauth(update: Update, context: CallbackContext):
+    auth_link = os.getenv("GOOGLE_AUTH_REDIRECT")
+    if not auth_link:
+        update.message.reply_text("Authorization link is not configured. Please contact support.")
+        return
+    
+    update.message.reply_text(
+        f"Please authorize the bot to access your Google Fit account:\n[Authorize Here]({auth_link})",
+        parse_mode="Markdown"
+    )
+
 def googlefit(update: Update, context: CallbackContext):
     service = google_fit_service()
     if not service:
-        update.message.reply_text("Failed to connect to Google Fit.")
+        update.message.reply_text(
+            "Failed to connect to Google Fit. Please authorize first by using /googleauth"
+        )
         return
 
     update.message.reply_text("Successfully connected to Google Fit API!")
-
-# === FLASK WEBHOOK ДЛЯ TELEGRAM ===
-@app.route("/telegram_webhook", methods=["POST"])
-def telegram_webhook():
-    try:
-        logger.info("Received webhook update")
-        data = request.get_json(force=True)
-        if not data:
-            logger.error("Empty or invalid JSON received")
-            return jsonify({"error": "Invalid JSON"}), 400
-        update = Update.de_json(data, updater.bot)
-        dispatcher.process_update(update)
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        logger.error(f"Error handling webhook: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/", methods=["GET"])
-def health_check():
-    return "Bot is running", 200
 
 # === ОБРАБОТЧИКИ КОМАНД ===
 dispatcher.add_handler(CommandHandler("start", start))
@@ -176,6 +171,7 @@ dispatcher.add_handler(CommandHandler("register", register))
 dispatcher.add_handler(CommandHandler("addmeal", addmeal))
 dispatcher.add_handler(CommandHandler("meals", meals))
 dispatcher.add_handler(CommandHandler("report", report))
+dispatcher.add_handler(CommandHandler("googleauth", googleauth))
 dispatcher.add_handler(CommandHandler("googlefit", googlefit))
 
 # === ЗАПУСК ПРИЛОЖЕНИЯ ===
