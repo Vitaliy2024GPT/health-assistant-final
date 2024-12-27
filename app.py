@@ -163,6 +163,13 @@ def googlefit(update: Update, context: CallbackContext):
 
     update.message.reply_text("Successfully connected to Google Fit API!")
 
+# === ОТЛАВЛИВАНИЕ ВЕБХУКА ===
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    update = Update.de_json(request.get_json(), updater.bot)
+    dispatcher.process_update(update)
+    return 'OK', 200
+
 # === ОБРАБОТЧИКИ КОМАНД ===
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("help", help_command))
@@ -179,6 +186,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"Starting Flask application on port {port}")
     Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
-    updater.start_webhook(listen='0.0.0.0', port=port, url_path='/telegram_webhook')
     updater.bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/telegram_webhook")
     updater.idle()
