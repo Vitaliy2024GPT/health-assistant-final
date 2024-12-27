@@ -99,6 +99,16 @@ def diet_advice(update: Update, context: CallbackContext):
     advice = "Drink water before meals to reduce hunger and improve digestion."
     update.message.reply_text(advice)
 
+def register(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    if len(context.args) < 1:
+        update.message.reply_text("Please provide a name. Usage: /register <name>")
+        return
+
+    name = " ".join(context.args)
+    add_user(chat_id, name)
+    update.message.reply_text(f"User {name} registered successfully!")
+
 def report_command(update: Update, context: CallbackContext):
     chat_id = update.message.chat_id
     user = get_user_by_chat_id(chat_id)
@@ -145,6 +155,7 @@ def health_check():
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("help", help_command))
 dispatcher.add_handler(CommandHandler("diet_advice", diet_advice))
+dispatcher.add_handler(CommandHandler("register", register))
 dispatcher.add_handler(CommandHandler("report", report_command))
 dispatcher.add_handler(CommandHandler("googleauth", google_auth))
 
@@ -154,4 +165,5 @@ if __name__ == "__main__":
     logger.info(f"Starting Flask application on port {port}")
     Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
     updater.start_webhook(listen='0.0.0.0', port=port, url_path='/telegram_webhook')
+    updater.bot.set_webhook(url=f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/telegram_webhook")
     updater.idle()
