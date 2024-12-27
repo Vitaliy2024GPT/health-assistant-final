@@ -1,17 +1,15 @@
 import os
 import sys
 import logging
-import tempfile
-import io
 import json
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, Dispatcher, CallbackContext
 from database import (
     init_db, close_connection, add_user, get_user_by_chat_id,
     add_meal, get_user_meals, get_meals_last_7_days, get_calories_last_7_days
 )
-from datetime import date, datetime
+from datetime import datetime
 import redis
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -69,52 +67,37 @@ def google_fit_service():
         logger.error(f"Failed to connect to Google Fit API: {e}")
         return None
 
-# === REDIS ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
-def save_temp_data(key, value, ttl=3600):
-    try:
-        redis_client.set(key, value, ex=ttl)
-    except Exception as e:
-        logger.error(f"Failed to save data in Redis: {e}")
-
-def get_temp_data(key):
-    try:
-        return redis_client.get(key)
-    except Exception as e:
-        logger.error(f"Failed to retrieve data from Redis: {e}")
-        return None
-
 # === TELEGRAM КОМАНДЫ ===
 def start(update: Update, context: CallbackContext):
     update.message.reply_text(
         "Welcome to Health Assistant Bot!\n"
         "Use /register <name> to create an account.\n"
-        "Then /addmeal <food> <calories> to log meals.\n"
-        "Use /meals to see all meals.\n"
+        "/addmeal <food> <calories> to log meals.\n"
+        "/meals to view your meals.\n"
         "/report to see weekly calories stats.\n"
-        "/diet_advice for a simple diet tip!\n"
+        "/diet_advice for a diet tip.\n"
         "/googlefit to get data from Google Fit API."
     )
 
 def help_command(update: Update, context: CallbackContext):
     update.message.reply_text(
         "Available commands:\n"
-        "/start - Introduction to the bot\n"
-        "/register <name> - Register your account\n"
-        "/addmeal <food> <calories> - Log a meal\n"
-        "/meals - View all logged meals\n"
-        "/report - Get weekly calorie report\n"
-        "/diet_advice - Receive a diet tip\n"
-        "/googlefit - Fetch step data from Google Fit"
+        "/start - Introduction\n"
+        "/register <name> - Register\n"
+        "/addmeal <food> <calories> - Add a meal\n"
+        "/meals - View meals\n"
+        "/report - Weekly report\n"
+        "/diet_advice - Diet tip\n"
+        "/googlefit - Google Fit data"
     )
 
 def diet_advice(update: Update, context: CallbackContext):
-    advice = "Drink water before meals to reduce hunger and improve digestion."
-    update.message.reply_text(advice)
+    update.message.reply_text("Drink water before meals to reduce hunger and improve digestion.")
 
 def register(update: Update, context: CallbackContext):
     chat_id = update.message.chat_id
     if len(context.args) < 1:
-        update.message.reply_text("Please provide a name. Usage: /register <name>")
+        update.message.reply_text("Usage: /register <name>")
         return
 
     if get_user_by_chat_id(chat_id):
@@ -122,40 +105,57 @@ def register(update: Update, context: CallbackContext):
         return
 
     name = " ".join(context.args)
-    if len(name) > 50:
-        update.message.reply_text("Name is too long. Please use a shorter name.")
-        return
-
     add_user(chat_id, name)
     update.message.reply_text(f"User {name} registered successfully!")
+
+def addmeal(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    if len(context.args) < 2:
+        update.message.reply_text("Usage: /addmeal <food> <calories>")
+        return
+
+    food = context.args[0]
+    calories = context.args[1]
+
+    add_meal(chat_id, food, calories)
+    update.message.reply_text(f"Meal '{food}' with {calories} calories added!")
+
+def meals(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    meals = get_user_meals(chat_id)
+    if not meals:
+        update.message.reply_text("No meals logged.")
+        return
+
+    response = "\n".join([f"{meal['food']}: {meal['calories']} kcal" for meal in meals])
+    update.message.reply_text(response)
+
+def report(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    stats = get_calories_last_7_days(chat_id)
+    if not stats:
+        update.message.reply_text("No data for the last 7 days.")
+        return
+
+    response = "\n".join(f"{day}: {calories} kcal" for day, calories in stats.items())
+    update.message.reply_text(response)
 
 def googlefit(update: Update, context: CallbackContext):
     service = google_fit_service()
     if not service:
-        update.message.reply_text("Failed to connect to Google Fit API.")
+        update.message.reply_text("Failed to connect to Google Fit.")
         return
-    update.message.reply_text("Successfully connected to Google Fit API!")
 
-@app.route("/telegram_webhook", methods=["POST"])
-def telegram_webhook():
-    try:
-        logger.info("Received webhook update")
-        data = request.get_json(force=True)
-        if not data:
-            logger.error("Empty or invalid JSON received")
-            return jsonify({"error": "Invalid JSON"}), 400
-        update = Update.de_json(data, updater.bot)
-        dispatcher.process_update(update)
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        logger.error(f"Error handling webhook: {e}")
-        return jsonify({"error": str(e)}), 500
+    update.message.reply_text("Successfully connected to Google Fit API!")
 
 # === ОБРАБОТЧИКИ КОМАНД ===
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("help", help_command))
 dispatcher.add_handler(CommandHandler("diet_advice", diet_advice))
 dispatcher.add_handler(CommandHandler("register", register))
+dispatcher.add_handler(CommandHandler("addmeal", addmeal))
+dispatcher.add_handler(CommandHandler("meals", meals))
+dispatcher.add_handler(CommandHandler("report", report))
 dispatcher.add_handler(CommandHandler("googlefit", googlefit))
 
 # === ЗАПУСК ПРИЛОЖЕНИЯ ===
