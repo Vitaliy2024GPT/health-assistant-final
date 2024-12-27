@@ -148,6 +148,26 @@ def googlefit(update: Update, context: CallbackContext):
 
     update.message.reply_text("Successfully connected to Google Fit API!")
 
+# === FLASK WEBHOOK ДЛЯ TELEGRAM ===
+@app.route("/telegram_webhook", methods=["POST"])
+def telegram_webhook():
+    try:
+        logger.info("Received webhook update")
+        data = request.get_json(force=True)
+        if not data:
+            logger.error("Empty or invalid JSON received")
+            return jsonify({"error": "Invalid JSON"}), 400
+        update = Update.de_json(data, updater.bot)
+        dispatcher.process_update(update)
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        logger.error(f"Error handling webhook: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/", methods=["GET"])
+def health_check():
+    return "Bot is running", 200
+
 # === ОБРАБОТЧИКИ КОМАНД ===
 dispatcher.add_handler(CommandHandler("start", start))
 dispatcher.add_handler(CommandHandler("help", help_command))
