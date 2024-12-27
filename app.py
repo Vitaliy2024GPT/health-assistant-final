@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 import json
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, redirect, url_for
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, Dispatcher, CallbackContext
 from database import (
@@ -163,7 +163,7 @@ def googlefit(update: Update, context: CallbackContext):
 
     update.message.reply_text("Successfully connected to Google Fit API!")
 
-# === ОТЛАВЛИВАНИЕ ВЕБХУКА ===
+# === ВЕБХУК ДЛЯ TELEGRAM ===
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     update = Update.de_json(request.get_json(), updater.bot)
