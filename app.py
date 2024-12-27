@@ -1,77 +1,123 @@
-import os
-import json
-from google.oauth2 import service_account
+from flask import Flask, request, redirect, jsonify
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from google.auth.transport.requests import Request
-from google.auth.exceptions import RefreshError
-import logging
+from telegram.ext import CommandHandler, Updater
+import os
 
-# === ЛОГИРОВАНИЕ ===
-logger = logging.getLogger(__name__)
+# Инициализация Flask-приложения
+app = Flask(__name__)
 
-# === ФУНКЦИЯ ДЛЯ ПОДКЛЮЧЕНИЯ GOOGLE FIT ===
-def google_fit_service():
+# Переменные окружения
+GOOGLE_AUTH_REDIRECT = os.getenv('GOOGLE_AUTH_REDIRECT', 'https://your-app.com/googleauth/callback')
+GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+# Инициализация Google OAuth Flow
+flow = Flow.from_client_secrets_file(
+    'credentials.json',  # Убедитесь, что этот файл загружен в проект
+    scopes=['https://www.googleapis.com/auth/fitness.activity.read'],
+    redirect_uri=GOOGLE_AUTH_REDIRECT
+)
+
+# ==========================
+# Flask Routes
+# ==========================
+
+@app.route('/')
+def home():
+    return "Health Assistant 360 is running!"
+
+@app.route('/googleauth')
+def google_auth():
+    """Инициализация авторизации Google Fit."""
+    auth_url, _ = flow.authorization_url(prompt='consent')
+    return redirect(auth_url)
+
+@app.route('/googleauth/callback')
+def google_auth_callback():
+    """Обработка кода авторизации и обмен на токен."""
+    code = request.args.get('code')
+    if code:
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+        # Сохранение токена в файл (или в базу данных)
+        with open('google_fit_token.json', 'w') as token_file:
+            token_file.write(credentials.to_json())
+        return "Успешно авторизовано через Google Fit! Можете вернуться в Telegram-бот."
+    return "Ошибка авторизации через Google Fit."
+
+@app.route('/googlefit')
+def google_fit():
+    """Получение данных из Google Fit."""
     try:
-        credentials_content = os.getenv("GOOGLE_CREDENTIALS")
-        if not credentials_content:
-            raise ValueError("Переменная GOOGLE_CREDENTIALS не установлена!")
-
-        credentials_data = json.loads(credentials_content)
-        credentials = service_account.Credentials.from_service_account_info(
-            credentials_data, scopes=["https://www.googleapis.com/auth/fitness.activity.read"]
-        )
-
-        if credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-
-        service = build("fitness", "v1", credentials=credentials)
-        return service
-
-    except RefreshError as e:
-        logger.error("Ошибка при обновлении токена Google Fit: %s", e)
-        return None
+        with open('google_fit_token.json', 'r') as token_file:
+            creds_data = token_file.read()
+        credentials = Credentials.from_authorized_user_info(eval(creds_data))
+        service = build('fitness', 'v1', credentials=credentials)
+        
+        data = service.users().dataset().aggregate(userId='me', body={
+            "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
+            "bucketByTime": {"durationMillis": 86400000},
+            "startTimeMillis": 1704067200000,
+            "endTimeMillis": 1704153600000
+        }).execute()
+        
+        return jsonify(data)
     except Exception as e:
-        logger.error("Ошибка подключения к Google Fit: %s", e)
-        return None
+        return f"Ошибка при получении данных из Google Fit: {e}"
 
+# ==========================
+# Telegram Bot Handlers
+# ==========================
 
-# === КОМАНДА GOOGLEAUTH ===
-from telegram import Update
-from telegram.ext import CallbackContext
+updater = Updater(TELEGRAM_TOKEN)
+dispatcher = updater.dispatcher
 
-def googleauth(update: Update, context: CallbackContext):
-    auth_link = os.getenv("GOOGLE_AUTH_REDIRECT")
-    if not auth_link:
-        update.message.reply_text("Ссылка для авторизации Google не настроена. Обратитесь в поддержку.")
-        return
-    
-    update.message.reply_text(
-        f"Для авторизации в Google Fit, перейдите по ссылке:\n{auth_link}",
-        parse_mode="Markdown"
-    )
+def start(update, context):
+    update.message.reply_text("Добро пожаловать в Health Assistant Bot!\n"
+                              "Команды:\n"
+                              "/googleauth - Авторизация Google Fit\n"
+                              "/googlefit - Получить данные из Google Fit")
 
+def googleauth(update, context):
+    update.message.reply_text(f'Пожалуйста, авторизуйтесь через Google Fit по ссылке: {GOOGLE_AUTH_REDIRECT}')
 
-# === КОМАНДА GOOGLEFIT ===
-def googlefit(update: Update, context: CallbackContext):
-    service = google_fit_service()
-    if not service:
-        update.message.reply_text(
-            "Не удалось подключиться к Google Fit. Проверьте авторизацию с помощью /googleauth."
-        )
-        return
-
+def googlefit(update, context):
     try:
-        response = service.users().dataset().aggregate(
-            userId="me",
-            body={
-                "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
-                "bucketByTime": {"durationMillis": 86400000},
-                "startTimeMillis": int((datetime.now() - timedelta(days=1)).timestamp() * 1000),
-                "endTimeMillis": int(datetime.now().timestamp() * 1000),
-            },
-        ).execute()
-        steps = response['bucket'][0]['dataset'][0]['point'][0]['value'][0]['intVal']
-        update.message.reply_text(f"Вчера вы прошли {steps} шагов!")
+        with open('google_fit_token.json', 'r') as token_file:
+            creds_data = token_file.read()
+        credentials = Credentials.from_authorized_user_info(eval(creds_data))
+        service = build('fitness', 'v1', credentials=credentials)
+        
+        data = service.users().dataset().aggregate(userId='me', body={
+            "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
+            "bucketByTime": {"durationMillis": 86400000},
+            "startTimeMillis": 1704067200000,
+            "endTimeMillis": 1704153600000
+        }).execute()
+        
+        update.message.reply_text(f'Данные из Google Fit:\n{data}')
     except Exception as e:
-        logger.error(f"Ошибка при запросе данных из Google Fit: {e}")
-        update.message.reply_text("Не удалось получить данные из Google Fit. Повторите попытку позже.")
+        update.message.reply_text(f'Ошибка при получении данных из Google Fit: {e}')
+
+# Добавление обработчиков команд
+dispatcher.add_handler(CommandHandler('start', start))
+dispatcher.add_handler(CommandHandler('googleauth', googleauth))
+dispatcher.add_handler(CommandHandler('googlefit', googlefit))
+
+# Запуск Telegram-бота
+def run_telegram_bot():
+    updater.start_polling()
+    updater.idle()
+
+# ==========================
+# Main Entry Point
+# ==========================
+
+if __name__ == '__main__':
+    import threading
+    telegram_thread = threading.Thread(target=run_telegram_bot)
+    telegram_thread.start()
+    app.run(host='0.0.0.0', port=10000)
