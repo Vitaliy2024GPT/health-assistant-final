@@ -7,6 +7,7 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import redis
 import logging
+import requests
 
 # Инициализация приложения Flask
 app = Flask(__name__)
@@ -40,7 +41,9 @@ flow = Flow.from_client_config(
     scopes=[
         'https://www.googleapis.com/auth/userinfo.email',
         'https://www.googleapis.com/auth/userinfo.profile',
-        'openid'
+        'openid',
+        'https://www.googleapis.com/auth/fitness.activity.read',
+        'https://www.googleapis.com/auth/fitness.body.read'
     ],
     redirect_uri=os.getenv('GOOGLE_AUTH_REDIRECT', 'http://localhost:10000/googleauth/callback')
 )
@@ -86,6 +89,10 @@ def google_auth_callback():
         user_info_service = build('oauth2', 'v2', credentials=credentials)
         user_info = user_info_service.userinfo().get().execute()
 
+        # Сохранение данных пользователя в Redis
+        if redis_client:
+            redis_client.set(f"user:{user_info['email']}:google_credentials", json.dumps(session['credentials']))
+
         return jsonify(user_info)
 
     except Exception as e:
@@ -109,7 +116,17 @@ def telegram_webhook():
         elif message_text == '/register':
             send_telegram_message(chat_id, "Вы успешно зарегистрированы!")
         elif message_text == '/googlefit':
-            send_telegram_message(chat_id, "Интеграция с Google Fit активирована!")
+            if 'credentials' not in session:
+                auth_url = url_for('google_auth', _external=True)
+                send_telegram_message(
+                    chat_id,
+                    f"Для интеграции с Google Fit, пожалуйста, авторизуйтесь здесь: {auth_url}"
+                )
+            else:
+                send_telegram_message(chat_id, "Интеграция с Google Fit активирована!")
+        elif message_text == '/logout':
+            session.clear()
+            send_telegram_message(chat_id, "Вы вышли из системы.")
         else:
             send_telegram_message(chat_id, "Извините, я не понимаю эту команду.")
 
@@ -161,7 +178,6 @@ def ping():
 
 # Вспомогательная функция для отправки сообщений через Telegram
 def send_telegram_message(chat_id, text):
-    import requests
     telegram_token = os.getenv('TELEGRAM_TOKEN')
     if not telegram_token:
         logger.error("TELEGRAM_TOKEN is not set")
@@ -175,6 +191,32 @@ def send_telegram_message(chat_id, text):
     response = requests.post(url, json=payload)
     if response.status_code != 200:
         logger.error(f"Failed to send message: {response.text}")
+
+
+# Обновление данных из Google Fit
+@app.route('/googlefit_data')
+def googlefit_data():
+    if 'credentials' not in session:
+        return redirect('/google_auth')
+
+    creds_info = session['credentials']
+    credentials = Credentials(**creds_info)
+    fitness_service = build('fitness', 'v1', credentials=credentials)
+
+    try:
+        data = fitness_service.users().dataset().aggregate(
+            userId='me',
+            body={
+                "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
+                "bucketByTime": {"durationMillis": 86400000},
+                "startTimeMillis": 0,
+                "endTimeMillis": 1
+            }
+        ).execute()
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Failed to fetch Google Fit data: {e}")
+        return f"Error fetching Google Fit data: {e}", 500
 
 
 # Точка входа
