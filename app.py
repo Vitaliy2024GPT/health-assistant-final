@@ -1,6 +1,6 @@
 import os
 import json
-from flask import Flask, request, redirect, session, jsonify
+from flask import Flask, request, redirect, session, jsonify, url_for
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -50,16 +50,18 @@ flow = Flow.from_client_config(
 def index():
     return "Welcome to Health Assistant 360"
 
+
 # Google OAuth 2.0 авторизация
 @app.route('/google_auth')
 def google_auth():
     logger.info("Starting Google OAuth flow")
     authorization_url, state = flow.authorization_url(
-        access_type='offline', 
+        access_type='offline',
         include_granted_scopes='true'
     )
     session['state'] = state
     return redirect(authorization_url)
+
 
 # Callback для Google OAuth
 @app.route('/googleauth/callback')
@@ -90,13 +92,29 @@ def google_auth_callback():
         logger.error(f"Failed during OAuth callback: {e}")
         return f"Error during OAuth callback: {e}", 500
 
+
 # Webhook для Telegram
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     logger.info("Received webhook update")
     update = request.get_json()
     logger.info(update)
+
+    if update and 'message' in update:
+        message_text = update['message'].get('text', '')
+        chat_id = update['message']['chat']['id']
+
+        if message_text == '/start':
+            send_telegram_message(chat_id, "Добро пожаловать в Health Assistant 360!")
+        elif message_text == '/register':
+            send_telegram_message(chat_id, "Вы успешно зарегистрированы!")
+        elif message_text == '/googlefit':
+            send_telegram_message(chat_id, "Интеграция с Google Fit активирована!")
+        else:
+            send_telegram_message(chat_id, "Извините, я не понимаю эту команду.")
+
     return jsonify({"status": "ok"})
+
 
 # Обновление токена Google
 @app.route('/refresh_token')
@@ -127,10 +145,37 @@ def refresh_token():
         logger.error(f"Failed to refresh token: {e}")
         return f"Error refreshing token: {e}", 500
 
+
+# Маршрут для завершения сеанса
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('index'))
+
+
 # Тестовый маршрут для проверки работы сервиса
 @app.route('/ping')
 def ping():
     return "Pong!"
+
+
+# Вспомогательная функция для отправки сообщений через Telegram
+def send_telegram_message(chat_id, text):
+    import requests
+    telegram_token = os.getenv('TELEGRAM_TOKEN')
+    if not telegram_token:
+        logger.error("TELEGRAM_TOKEN is not set")
+        return
+
+    url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text
+    }
+    response = requests.post(url, json=payload)
+    if response.status_code != 200:
+        logger.error(f"Failed to send message: {response.text}")
+
 
 # Точка входа
 if __name__ == '__main__':
