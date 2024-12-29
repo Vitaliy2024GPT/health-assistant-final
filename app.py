@@ -8,6 +8,7 @@ from googleapiclient.discovery import build
 import redis
 import logging
 import requests
+from flask_session import Session
 
 # Инициализация приложения Flask
 app = Flask(__name__)
@@ -24,6 +25,16 @@ if redis_url:
 else:
     logger.warning("REDIS_URL is not set. Redis functionality will be disabled.")
     redis_client = None
+
+# Настройка Flask-Session
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
+app.config['SESSION_REDIS'] = redis_client if redis_client else None
+
+# Инициализация сессий
+Session(app)
 
 # Чтение учетных данных Google из переменной окружения
 google_credentials = os.getenv('GOOGLE_CREDENTIALS')
@@ -45,7 +56,7 @@ flow = Flow.from_client_config(
         'https://www.googleapis.com/auth/fitness.activity.read',
         'https://www.googleapis.com/auth/fitness.body.read'
     ],
-    redirect_uri=os.getenv('GOOGLE_AUTH_REDIRECT', 'http://localhost:10000/googleauth/callback')
+    redirect_uri=os.getenv('GOOGLE_AUTH_REDIRECT', 'https://health-assistant-final.onrender.com/googleauth/callback')
 )
 
 # Главная страница
@@ -63,6 +74,7 @@ def google_auth():
         include_granted_scopes='true'
     )
     session['state'] = state
+    logger.info(f"OAuth state saved in session: {state}")
     return redirect(authorization_url)
 
 
@@ -71,7 +83,11 @@ def google_auth():
 def google_auth_callback():
     logger.info("Handling Google OAuth callback")
     state = session.get('state')
-    if not state:
+    response_state = request.args.get('state')
+    logger.info(f"Session state: {state}, Response state: {response_state}")
+
+    if not state or state != response_state:
+        logger.error("State mismatch error during OAuth callback")
         return "State mismatch error", 400
 
     try:
@@ -170,10 +186,18 @@ def logout():
     return redirect(url_for('index'))
 
 
-# Тестовый маршрут для проверки работы сервиса
-@app.route('/ping')
-def ping():
-    return "Pong!"
+# Тестовый маршрут для Redis
+@app.route('/test_redis')
+def test_redis():
+    try:
+        if redis_client:
+            redis_client.set('test_key', 'Redis is working!')
+            value = redis_client.get('test_key').decode('utf-8')
+            return f"Redis test successful: {value}"
+        else:
+            return "Redis is not configured properly."
+    except Exception as e:
+        return f"Redis test failed: {e}"
 
 
 # Вспомогательная функция для отправки сообщений через Telegram
@@ -191,32 +215,6 @@ def send_telegram_message(chat_id, text):
     response = requests.post(url, json=payload)
     if response.status_code != 200:
         logger.error(f"Failed to send message: {response.text}")
-
-
-# Обновление данных из Google Fit
-@app.route('/googlefit_data')
-def googlefit_data():
-    if 'credentials' not in session:
-        return redirect('/google_auth')
-
-    creds_info = session['credentials']
-    credentials = Credentials(**creds_info)
-    fitness_service = build('fitness', 'v1', credentials=credentials)
-
-    try:
-        data = fitness_service.users().dataset().aggregate(
-            userId='me',
-            body={
-                "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
-                "bucketByTime": {"durationMillis": 86400000},
-                "startTimeMillis": 0,
-                "endTimeMillis": 1
-            }
-        ).execute()
-        return jsonify(data)
-    except Exception as e:
-        logger.error(f"Failed to fetch Google Fit data: {e}")
-        return f"Error fetching Google Fit data: {e}", 500
 
 
 # Точка входа
