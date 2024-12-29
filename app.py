@@ -32,8 +32,6 @@ app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_USE_SIGNER'] = True
 app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
 app.config['SESSION_REDIS'] = redis_client if redis_client else None
-
-# Инициализация сессий
 Session(app)
 
 # Чтение учетных данных Google из переменной окружения
@@ -82,13 +80,13 @@ def google_auth():
 @app.route('/googleauth/callback')
 def google_auth_callback():
     logger.info("Handling Google OAuth callback")
-    state = session.get('state')
+    session_state = session.get('state')
     response_state = request.args.get('state')
-    logger.info(f"Session state: {state}, Response state: {response_state}")
+    logger.info(f"Session state: {session_state}, Response state: {response_state}")
 
-    if not state or state != response_state:
+    if not session_state or session_state != response_state:
         logger.error("State mismatch error during OAuth callback")
-        return "State mismatch error", 400
+        return "State mismatch error. Please try again.", 400
 
     try:
         flow.fetch_token(authorization_response=request.url)
@@ -114,6 +112,12 @@ def google_auth_callback():
     except Exception as e:
         logger.error(f"Failed during OAuth callback: {e}")
         return f"Error during OAuth callback: {e}", 500
+
+
+# Вспомогательный маршрут для отладки сессии
+@app.route('/session_debug')
+def session_debug():
+    return jsonify(dict(session))
 
 
 # Webhook для Telegram
@@ -147,57 +151,6 @@ def telegram_webhook():
             send_telegram_message(chat_id, "Извините, я не понимаю эту команду.")
 
     return jsonify({"status": "ok"})
-
-
-# Обновление токена Google
-@app.route('/refresh_token')
-def refresh_token():
-    if 'credentials' not in session:
-        return redirect('/google_auth')
-
-    creds_info = session['credentials']
-    credentials = Credentials(**creds_info)
-
-    try:
-        if credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-            session['credentials'] = {
-                'token': credentials.token,
-                'refresh_token': credentials.refresh_token,
-                'token_uri': credentials.token_uri,
-                'client_id': credentials.client_id,
-                'client_secret': credentials.client_secret,
-                'scopes': credentials.scopes
-            }
-
-            return "Token refreshed successfully"
-        else:
-            return "Token is still valid"
-
-    except Exception as e:
-        logger.error(f"Failed to refresh token: {e}")
-        return f"Error refreshing token: {e}", 500
-
-
-# Маршрут для завершения сеанса
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('index'))
-
-
-# Тестовый маршрут для Redis
-@app.route('/test_redis')
-def test_redis():
-    try:
-        if redis_client:
-            redis_client.set('test_key', 'Redis is working!')
-            value = redis_client.get('test_key').decode('utf-8')
-            return f"Redis test successful: {value}"
-        else:
-            return "Redis is not configured properly."
-    except Exception as e:
-        return f"Redis test failed: {e}"
 
 
 # Вспомогательная функция для отправки сообщений через Telegram
