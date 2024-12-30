@@ -8,12 +8,17 @@ from telegram import Bot, Update
 from telegram.ext import Updater, CommandHandler, Dispatcher
 from threading import Thread
 import redis
+import logging
 
-# Инициализация Flask-приложения
+# === Настройка логирования ===
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# === Инициализация Flask-приложения ===
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY')
 
-# Настройка сессий
+# === Настройка сессий ===
 app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_USE_SIGNER'] = True
@@ -21,16 +26,16 @@ app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
 app.config['SESSION_REDIS'] = redis.from_url(os.getenv('REDIS_URL'))
 Session(app)
 
-# Настройка Telegram-бота
+# === Настройка Telegram-бота ===
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 bot = Bot(token=TELEGRAM_TOKEN)
 
-# Google OAuth 2.0
+# === Google OAuth 2.0 ===
 GOOGLE_AUTH_REDIRECT = os.getenv('GOOGLE_AUTH_REDIRECT')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 
-# Google OAuth Flow
+# === Google OAuth Flow ===
 flow = Flow.from_client_config(
     client_config=eval(GOOGLE_CREDENTIALS),
     scopes=[
@@ -60,10 +65,14 @@ def google_auth():
 
 @app.route('/googleauth/callback')
 def google_auth_callback():
-    flow.fetch_token(authorization_response=request.url)
-    credentials = flow.credentials
-    session['credentials'] = credentials_to_dict(credentials)
-    return redirect(url_for('profile'))
+    try:
+        flow.fetch_token(authorization_response=request.url)
+        credentials = flow.credentials
+        session['credentials'] = credentials_to_dict(credentials)
+        return redirect(url_for('profile'))
+    except Exception as e:
+        logger.error(f"Ошибка Google OAuth: {e}")
+        return f"Ошибка Google OAuth: {e}", 500
 
 
 @app.route('/profile')
@@ -112,13 +121,26 @@ def logout():
 
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
-    from telegram import Update
-    from telegram.ext import Dispatcher
+    try:
+        from telegram import Update
+        from telegram.ext import Dispatcher
+        
+        update = Update.de_json(request.get_json(force=True), bot)
+        
+        dispatcher = Dispatcher(bot, None, workers=0)
+        dispatcher.add_handler(CommandHandler("start", start))
+        dispatcher.add_handler(CommandHandler("profile", profile_command))
+        dispatcher.add_handler(CommandHandler("health", health_command))
+        dispatcher.add_handler(CommandHandler("help", help_command))
+        dispatcher.add_handler(CommandHandler("logout", logout_command))
+        
+        dispatcher.process_update(update)
+        
+        return 'OK', 200
     
-    dispatcher = Dispatcher(bot, None, workers=0)
-    update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
-    return 'OK', 200
+    except Exception as e:
+        logger.error(f"Ошибка в telegram_webhook: {e}")
+        return f"Internal Server Error: {e}", 500
 
 
 # === Telegram Команды ===
@@ -150,7 +172,7 @@ def logout_command(update, context):
     update.message.reply_text("Вы вышли из системы. До встречи!")
 
 
-# Восстановленные недостающие функции
+# Дополнительные команды для прямого использования через бота
 def show_help(chat_id):
     bot.send_message(chat_id=chat_id, text="""
     Доступные команды:
