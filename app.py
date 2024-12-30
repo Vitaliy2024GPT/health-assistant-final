@@ -55,12 +55,16 @@ def home():
 
 @app.route('/google_auth')
 def google_auth():
-    authorization_url, state = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true'
-    )
-    session['state'] = state
-    return redirect(authorization_url)
+    try:
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true'
+        )
+        session['state'] = state
+        return redirect(authorization_url)
+    except Exception as e:
+        logger.error(f"Ошибка Google OAuth: {e}")
+        return f"Ошибка Google OAuth: {e}", 500
 
 
 @app.route('/googleauth/callback')
@@ -127,13 +131,14 @@ def logout():
 def telegram_webhook():
     try:
         update = Update.de_json(request.get_json(force=True), bot)
-        
         dispatcher = Dispatcher(bot, None, workers=1)
+        
         dispatcher.add_handler(CommandHandler("start", start))
         dispatcher.add_handler(CommandHandler("profile", profile_command))
         dispatcher.add_handler(CommandHandler("health", health_command))
         dispatcher.add_handler(CommandHandler("help", help_command))
         dispatcher.add_handler(CommandHandler("logout", logout_command))
+        dispatcher.add_handler(CommandHandler("google_auth", google_auth_command))
         
         dispatcher.process_update(update)
         
@@ -164,7 +169,8 @@ def help_command(update, context):
         "/profile - Показать профиль\n"
         "/health - Данные Google Fit\n"
         "/logout - Выйти\n"
-        "/help - Справка"
+        "/help - Справка\n"
+        "/google_auth - Авторизация через Google"
     )
 
 
@@ -173,16 +179,15 @@ def logout_command(update, context):
     update.message.reply_text("Вы вышли из системы. До встречи!")
 
 
-# Дополнительные команды для прямого использования через бота
-def show_help(chat_id):
-    bot.send_message(chat_id=chat_id, text="""
-    Доступные команды:
-    /start - Начать
-    /profile - Показать профиль
-    /health - Показать данные Google Fit
-    /help - Показать помощь
-    /logout - Выйти
-    """)
+def google_auth_command(update, context):
+    auth_url = GOOGLE_AUTH_REDIRECT
+    if auth_url:
+        update.message.reply_text(
+            f"Для авторизации через Google, перейдите по ссылке:\n\n[Авторизация Google]({auth_url})",
+            parse_mode='Markdown'
+        )
+    else:
+        update.message.reply_text("Ошибка: Не указана ссылка для авторизации Google OAuth.")
 
 
 def start_telegram_bot():
@@ -194,6 +199,7 @@ def start_telegram_bot():
     dispatcher.add_handler(CommandHandler("health", health_command))
     dispatcher.add_handler(CommandHandler("help", help_command))
     dispatcher.add_handler(CommandHandler("logout", logout_command))
+    dispatcher.add_handler(CommandHandler("google_auth", google_auth_command))
 
     updater.start_webhook(
         listen='0.0.0.0',
