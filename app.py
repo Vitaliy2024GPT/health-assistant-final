@@ -114,13 +114,7 @@ def google_auth_callback():
         return f"Error during OAuth callback: {e}", 500
 
 
-# Вспомогательный маршрут для отладки сессии
-@app.route('/session_debug')
-def session_debug():
-    return jsonify(dict(session))
-
-
-# Webhook для Telegram
+# Telegram Webhook
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     logger.info("Received webhook update")
@@ -132,21 +126,25 @@ def telegram_webhook():
         chat_id = update['message']['chat']['id']
 
         if message_text == '/start':
-            send_telegram_message(chat_id, "Добро пожаловать в Health Assistant 360!")
-        elif message_text == '/register':
-            send_telegram_message(chat_id, "Вы успешно зарегистрированы!")
-        elif message_text == '/googlefit':
-            if 'credentials' not in session:
+            send_telegram_message(chat_id, "Добро пожаловать в Health Assistant 360! 🚀")
+        elif message_text == '/profile':
+            credentials = session.get('credentials')
+            if not credentials:
                 auth_url = url_for('google_auth', _external=True)
                 send_telegram_message(
                     chat_id,
-                    f"Для интеграции с Google Fit, пожалуйста, авторизуйтесь здесь: {auth_url}"
+                    f"Пожалуйста, пройдите авторизацию через Google для просмотра профиля: {auth_url}"
                 )
             else:
-                send_telegram_message(chat_id, "Интеграция с Google Fit активирована!")
-        elif message_text == '/logout':
-            session.clear()
-            send_telegram_message(chat_id, "Вы вышли из системы.")
+                user_info_service = build('oauth2', 'v2', credentials=Credentials(**credentials))
+                user_info = user_info_service.userinfo().get().execute()
+                send_telegram_message(
+                    chat_id,
+                    f"👤 Профиль пользователя:\n"
+                    f"Имя: {user_info.get('name')}\n"
+                    f"Email: {user_info.get('email')}\n"
+                    f"Фото: {user_info.get('picture')}"
+                )
         else:
             send_telegram_message(chat_id, "Извините, я не понимаю эту команду.")
 
@@ -161,15 +159,12 @@ def send_telegram_message(chat_id, text):
         return
 
     url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-    payload = {
-        'chat_id': chat_id,
-        'text': text
-    }
+    payload = {'chat_id': chat_id, 'text': text}
     response = requests.post(url, json=payload)
     if response.status_code != 200:
         logger.error(f"Failed to send message: {response.text}")
 
 
-# Точка входа
+# Запуск приложения
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000)))
