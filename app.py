@@ -61,7 +61,7 @@ def google_auth():
             include_granted_scopes='true'
         )
         session['state'] = state
-        logger.info(f"OAuth state сохранен: {state}")
+        logger.info(f"OAuth state сохранён: {state}")
         return redirect(authorization_url)
     except Exception as e:
         logger.error(f"Ошибка Google OAuth: {e}")
@@ -74,19 +74,22 @@ def google_auth_callback():
         state = request.args.get('state')
         code = request.args.get('code')
         
-        # Проверка на наличие state и code
+        # Проверка state
         if not state or state != session.get('state'):
-            logger.error("State mismatch. Possible CSRF attack.")
+            logger.error(f"State mismatch. Expected: {session.get('state')}, Got: {state}")
+            session.pop('state', None)
             return "State mismatch. Please try again.", 400
 
+        # Проверка наличия кода
         if not code:
-            logger.error("Missing code parameter in response.")
-            return redirect(url_for('google_auth'))
-        
-        # Получение токена
+            logger.error("Missing 'code' parameter in callback.")
+            return "Missing 'code' parameter. Please try again.", 400
+
+        # Обновление токена
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
+        session.pop('state', None)
         logger.info("OAuth авторизация успешно завершена.")
         return redirect(url_for('profile'))
     except Exception as e:
@@ -116,8 +119,6 @@ def health():
     data = fitness_service.users().dataset().aggregate(userId='me', body={
         "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
         "bucketByTime": {"durationMillis": 86400000},
-        "startTimeMillis": 0,
-        "endTimeMillis": 1
     }).execute()
     return jsonify(data)
 
@@ -181,8 +182,7 @@ def help_command(update, context):
         "/profile - Показать профиль\n"
         "/health - Данные Google Fit\n"
         "/logout - Выйти\n"
-        "/help - Справка\n"
-        "/google_auth - Авторизация через Google"
+        "/help - Справка"
     )
 
 
@@ -195,8 +195,6 @@ def google_auth_command(update, context):
     auth_url = GOOGLE_AUTH_REDIRECT
     update.message.reply_text(f"Перейдите по ссылке для авторизации: {auth_url}")
 
-
-# === Запуск приложения ===
 
 if __name__ == '__main__':
     bot_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=10000))
