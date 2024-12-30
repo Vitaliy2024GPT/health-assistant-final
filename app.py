@@ -134,8 +134,7 @@ def telegram_webhook():
 
     return jsonify({"status": "ok"})
 
-# Вспомогательные функции
-
+# Вспомогательная функция для отправки сообщений через Telegram
 def send_telegram_message(chat_id, text):
     telegram_token = os.getenv('TELEGRAM_TOKEN')
     if not telegram_token:
@@ -148,6 +147,7 @@ def send_telegram_message(chat_id, text):
     if response.status_code != 200:
         logger.error(f"Failed to send message: {response.text}")
 
+# Показ профиля
 def show_profile(chat_id):
     credentials = session.get('credentials')
     if not credentials:
@@ -156,7 +156,36 @@ def show_profile(chat_id):
     else:
         user_info_service = build('oauth2', 'v2', credentials=Credentials(**credentials))
         user_info = user_info_service.userinfo().get().execute()
-        send_telegram_message(chat_id, f"👤 Профиль:\nИмя: {user_info.get('name')}\nEmail: {user_info.get('email')}")
+        send_telegram_message(
+            chat_id,
+            f"👤 Профиль:\nИмя: {user_info.get('name')}\nEmail: {user_info.get('email')}"
+        )
+
+# Показ данных о здоровье
+def show_health_data(chat_id):
+    credentials = session.get('credentials')
+    if not credentials:
+        send_telegram_message(chat_id, "Требуется авторизация для доступа к данным Google Fit.")
+    else:
+        fitness_service = build('fitness', 'v1', credentials=Credentials(**credentials))
+        data = fitness_service.users().dataset().get(userId='me').execute()
+        send_telegram_message(chat_id, f"🏃 Данные здоровья:\n{data}")
+
+# Команда помощи
+def show_help(chat_id):
+    help_text = (
+        "/start - Начать\n"
+        "/profile - Показать профиль\n"
+        "/health - Данные Google Fit\n"
+        "/logout - Выйти\n"
+        "/help - Справка"
+    )
+    send_telegram_message(chat_id, help_text)
+
+# Выход из системы
+def logout_user(chat_id):
+    session.clear()
+    send_telegram_message(chat_id, "Вы успешно вышли из системы.")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000)))
