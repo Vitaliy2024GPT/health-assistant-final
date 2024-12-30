@@ -183,6 +183,11 @@ def help_command(update, context):
     )
 
 
+def logout_command(update, context):
+    session.clear()
+    update.message.reply_text("Вы вышли из системы. До встречи!")
+
+
 def google_auth_command(update, context):
     auth_url = GOOGLE_AUTH_REDIRECT
     update.message.reply_text(f"Перейдите по ссылке для авторизации: {auth_url}")
