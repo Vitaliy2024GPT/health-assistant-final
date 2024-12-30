@@ -61,6 +61,7 @@ def google_auth():
             include_granted_scopes='true'
         )
         session['state'] = state
+        logger.info(f"OAuth state сохранен: {state}")
         return redirect(authorization_url)
     except Exception as e:
         logger.error(f"Ошибка Google OAuth: {e}")
@@ -70,16 +71,24 @@ def google_auth():
 @app.route('/googleauth/callback')
 def google_auth_callback():
     try:
-        if session.get('state') != request.args.get('state'):
+        state = request.args.get('state')
+        if session.get('state') != state:
             logger.error("State mismatch. Possible CSRF attack.")
+            session.pop('state', None)
             return "State mismatch. Please try again.", 400
+
+        if 'code' not in request.args:
+            logger.error("Missing code parameter in response.")
+            return "Missing code parameter. Please try again.", 400
 
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
+        logger.info("OAuth авторизация успешно завершена.")
         return redirect(url_for('profile'))
     except Exception as e:
         logger.error(f"Ошибка Google OAuth: {e}")
+        session.pop('state', None)
         return f"Ошибка Google OAuth: {e}", 500
 
 
@@ -174,43 +183,13 @@ def help_command(update, context):
     )
 
 
-def logout_command(update, context):
-    session.clear()
-    update.message.reply_text("Вы вышли из системы. До встречи!")
-
-
 def google_auth_command(update, context):
     auth_url = GOOGLE_AUTH_REDIRECT
-    if auth_url:
-        update.message.reply_text(
-            f"Для авторизации через Google, перейдите по ссылке:\n\n[Авторизация Google]({auth_url})",
-            parse_mode='Markdown'
-        )
-    else:
-        update.message.reply_text("Ошибка: Не указана ссылка для авторизации Google OAuth.")
+    update.message.reply_text(f"Перейдите по ссылке для авторизации: {auth_url}")
 
 
-def start_telegram_bot():
-    updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
-
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("profile", profile_command))
-    dispatcher.add_handler(CommandHandler("health", health_command))
-    dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(CommandHandler("logout", logout_command))
-    dispatcher.add_handler(CommandHandler("google_auth", google_auth_command))
-
-    updater.start_webhook(
-        listen='0.0.0.0',
-        port=10000,
-        url_path=TELEGRAM_TOKEN,
-        webhook_url=f"{WEBHOOK_URL}/telegram_webhook"
-    )
-    updater.idle()
-
+# === Запуск приложения ===
 
 if __name__ == '__main__':
-    bot_thread = Thread(target=start_telegram_bot)
+    bot_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=10000))
     bot_thread.start()
-    app.run(host='0.0.0.0', port=10000)
