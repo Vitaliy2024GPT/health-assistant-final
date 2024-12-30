@@ -66,6 +66,10 @@ def google_auth():
 @app.route('/googleauth/callback')
 def google_auth_callback():
     try:
+        if session.get('state') != request.args.get('state'):
+            logger.error("State mismatch. Possible CSRF attack.")
+            return "State mismatch. Please try again.", 400
+
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
@@ -122,12 +126,9 @@ def logout():
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     try:
-        from telegram import Update
-        from telegram.ext import Dispatcher
-        
         update = Update.de_json(request.get_json(force=True), bot)
         
-        dispatcher = Dispatcher(bot, None, workers=0)
+        dispatcher = Dispatcher(bot, None, workers=1)
         dispatcher.add_handler(CommandHandler("start", start))
         dispatcher.add_handler(CommandHandler("profile", profile_command))
         dispatcher.add_handler(CommandHandler("health", health_command))
@@ -203,14 +204,7 @@ def start_telegram_bot():
     updater.idle()
 
 
-# === Запуск приложения ===
-
 if __name__ == '__main__':
-    from threading import Thread
-    
-    # Запуск Telegram-бота в отдельном потоке
     bot_thread = Thread(target=start_telegram_bot)
     bot_thread.start()
-    
-    # Запуск Flask-приложения
     app.run(host='0.0.0.0', port=10000)
