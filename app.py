@@ -72,15 +72,18 @@ def google_auth():
 def google_auth_callback():
     try:
         state = request.args.get('state')
-        if session.get('state') != state:
+        code = request.args.get('code')
+        
+        # Проверка на наличие state и code
+        if not state or state != session.get('state'):
             logger.error("State mismatch. Possible CSRF attack.")
-            session.pop('state', None)
             return "State mismatch. Please try again.", 400
 
-        if 'code' not in request.args:
+        if not code:
             logger.error("Missing code parameter in response.")
-            return "Missing code parameter. Please try again.", 400
-
+            return redirect(url_for('google_auth'))
+        
+        # Получение токена
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
