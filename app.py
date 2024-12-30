@@ -61,6 +61,7 @@ def google_auth():
             include_granted_scopes='true'
         )
         session['state'] = state
+        session.modified = True  # Гарантируем сохранение сессии
         logger.info(f"OAuth state сохранён: {state}")
         return redirect(authorization_url)
     except Exception as e:
@@ -72,26 +73,25 @@ def google_auth():
 def google_auth_callback():
     try:
         state = request.args.get('state')
-        code = request.args.get('code')
-        
-        # Проверка state
-        if not state or state != session.get('state'):
-            logger.error(f"State mismatch. Expected: {session.get('state')}, Got: {state}")
+        session_state = session.get('state')
+
+        if not state or state != session_state:
+            logger.error(f"State mismatch. Expected: {session_state}, Got: {state}")
             session.pop('state', None)
             return "State mismatch. Please try again.", 400
 
-        # Проверка наличия кода
-        if not code:
+        if 'code' not in request.args:
             logger.error("Missing 'code' parameter in callback.")
             return "Missing 'code' parameter. Please try again.", 400
 
-        # Обновление токена
+        # Получаем токен
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
         session.pop('state', None)
         logger.info("OAuth авторизация успешно завершена.")
         return redirect(url_for('profile'))
+
     except Exception as e:
         logger.error(f"Ошибка Google OAuth: {e}")
         session.pop('state', None)
@@ -195,6 +195,8 @@ def google_auth_command(update, context):
     auth_url = GOOGLE_AUTH_REDIRECT
     update.message.reply_text(f"Перейдите по ссылке для авторизации: {auth_url}")
 
+
+# === Запуск приложения ===
 
 if __name__ == '__main__':
     bot_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=10000))
