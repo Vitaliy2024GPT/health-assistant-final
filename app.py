@@ -56,6 +56,7 @@ flow = Flow.from_client_config(
     redirect_uri=os.getenv('GOOGLE_AUTH_REDIRECT', 'https://health-assistant-final.onrender.com/googleauth/callback')
 )
 
+
 # Главная страница
 @app.route('/')
 def index():
