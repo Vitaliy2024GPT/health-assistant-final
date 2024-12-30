@@ -7,11 +7,12 @@ import requests
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GOOGLE_API_URL = "https://www.googleapis.com/oauth2/v1/userinfo"
 
+# Команда /start
 def start(update: Update, context: CallbackContext):
     update.message.reply_text("Добро пожаловать в Health Assistant 360! 🚀")
 
+# Команда /profile
 def profile(update: Update, context: CallbackContext):
-    # Проверка сохранённого токена в сессии
     google_token = os.getenv("GOOGLE_OAUTH_TOKEN")
     if not google_token:
         update.message.reply_text(
@@ -20,7 +21,6 @@ def profile(update: Update, context: CallbackContext):
         )
         return
 
-    # Запрос данных профиля
     headers = {"Authorization": f"Bearer {google_token}"}
     response = requests.get(GOOGLE_API_URL, headers=headers)
     
@@ -35,13 +35,16 @@ def profile(update: Update, context: CallbackContext):
     else:
         update.message.reply_text("Ошибка при получении профиля. Пожалуйста, авторизуйтесь заново.")
 
+# Основная функция
 def main():
     updater = Updater(TELEGRAM_TOKEN)
     dispatcher = updater.dispatcher
 
+    # Регистрация команд
     dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("profile", profile))
+    dispatcher.add_handler(CommandHandler("profile", profile))  # Убедитесь, что обработчик добавлен
 
+    # Запуск бота
     updater.start_polling()
     updater.idle()
 
