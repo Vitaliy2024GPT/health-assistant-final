@@ -1,169 +1,98 @@
 import os
-import json
-from flask import Flask, request, redirect, session, url_for
+from flask import Flask, request, session, redirect, url_for, jsonify
 from flask_session import Session
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from telegram import Update, Bot
-from telegram.ext import Updater, CommandHandler, CallbackContext
-import logging
+from telegram import Bot, Update
+from telegram.ext import Updater, CommandHandler, Dispatcher
+from threading import Thread
+import redis
 
-# Инициализация Flask приложения
+# Инициализация Flask-приложения
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY')
-app.config['SESSION_TYPE'] = 'filesystem'
+
+# Настройка сессий
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
+app.config['SESSION_REDIS'] = redis.from_url(os.getenv('REDIS_URL'))
 Session(app)
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Телеграм бот
+# Настройка Telegram-бота
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # Google OAuth 2.0
-google_credentials = json.loads(os.getenv('GOOGLE_CREDENTIALS'))
-GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_AUTH_REDIRECT')
+GOOGLE_AUTH_REDIRECT = os.getenv('GOOGLE_AUTH_REDIRECT')
+GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 
+# Google OAuth Flow
 flow = Flow.from_client_config(
-    google_credentials,
-    scopes=['https://www.googleapis.com/auth/fitness.activity.read',
-            'https://www.googleapis.com/auth/fitness.body.read',
-            'https://www.googleapis.com/auth/userinfo.profile',
-            'https://www.googleapis.com/auth/userinfo.email',
-            'openid'],
-    redirect_uri=GOOGLE_REDIRECT_URI
+    client_config=eval(GOOGLE_CREDENTIALS),
+    scopes=[
+        "https://www.googleapis.com/auth/fitness.activity.read",
+        "https://www.googleapis.com/auth/fitness.body.read",
+        "openid", "email", "profile"
+    ],
+    redirect_uri=GOOGLE_AUTH_REDIRECT
 )
 
-# ====================
-# 📌 Flask маршруты
-# ====================
+
+# === Flask Маршруты ===
 
 @app.route('/')
 def home():
-    return 'Health Assistant 360 is running! 🚀'
+    return "Health Assistant 360 is running!"
 
 
 @app.route('/google_auth')
 def google_auth():
-    auth_url, _ = flow.authorization_url(prompt='consent')
-    return redirect(auth_url)
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
+    )
+    session['state'] = state
+    return redirect(authorization_url)
 
 
 @app.route('/googleauth/callback')
 def google_auth_callback():
-    try:
-        flow.fetch_token(authorization_response=request.url)
-        credentials = flow.credentials
-        session['google_credentials'] = credentials_to_dict(credentials)
-        return redirect(url_for('profile'))
-    except Exception as e:
-        logger.error(f"Ошибка авторизации: {e}")
-        return 'Ошибка авторизации Google.', 500
+    flow.fetch_token(authorization_response=request.url)
+    credentials = flow.credentials
+    session['credentials'] = credentials_to_dict(credentials)
+    return redirect(url_for('profile'))
 
 
 @app.route('/profile')
 def profile():
-    credentials = session.get('google_credentials')
-    if not credentials:
+    if 'credentials' not in session:
         return redirect(url_for('google_auth'))
-
-    try:
-        creds = Credentials(**credentials)
-        service = build('oauth2', 'v2', credentials=creds)
-        user_info = service.userinfo().get().execute()
-        return f'Привет, {user_info["name"]}! Ваш email: {user_info["email"]}'
-    except Exception as e:
-        logger.error(f"Ошибка получения профиля: {e}")
-        return 'Ошибка получения данных профиля.', 500
+    
+    credentials = Credentials(**session['credentials'])
+    service = build('oauth2', 'v2', credentials=credentials)
+    user_info = service.userinfo().get().execute()
+    return jsonify(user_info)
 
 
 @app.route('/health')
 def health():
-    credentials = session.get('google_credentials')
-    if not credentials:
+    if 'credentials' not in session:
         return redirect(url_for('google_auth'))
+    
+    credentials = Credentials(**session['credentials'])
+    fitness_service = build('fitness', 'v1', credentials=credentials)
+    data = fitness_service.users().dataset().aggregate(userId='me', body={
+        "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
+        "bucketByTime": {"durationMillis": 86400000},
+        "startTimeMillis": 0,
+        "endTimeMillis": 1
+    }).execute()
+    return jsonify(data)
 
-    try:
-        creds = Credentials(**credentials)
-        fitness_service = build('fitness', 'v1', credentials=creds)
-        data = fitness_service.users().dataset().aggregate(userId='me', body={
-            "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
-            "bucketByTime": {"durationMillis": 86400000},
-            "startTimeMillis": 0,
-            "endTimeMillis": 0
-        }).execute()
-        return f'Данные Google Fit: {data}'
-    except Exception as e:
-        logger.error(f"Ошибка данных Google Fit: {e}")
-        return 'Ошибка получения данных Google Fit.', 500
-
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('home'))
-
-
-# ====================
-# 📌 Telegram Bot
-# ====================
-
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "Добро пожаловать в Health Assistant 360! 🚀\n"
-        "/profile - Показать профиль\n"
-        "/health - Данные Google Fit\n"
-        "/logout - Выйти\n"
-        "/help - Справка"
-    )
-
-
-def profile_command(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        f"Пожалуйста, пройдите авторизацию через Google: {GOOGLE_REDIRECT_URI}"
-    )
-
-
-def health_command(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "Требуется авторизация для доступа к данным Google Fit."
-    )
-
-
-def help_command(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "/start - Начать\n"
-        "/profile - Показать профиль\n"
-        "/health - Данные Google Fit\n"
-        "/logout - Выйти\n"
-        "/help - Справка"
-    )
-
-
-def logout_command(update: Update, context: CallbackContext):
-    update.message.reply_text("Вы успешно вышли из системы.")
-
-
-def telegram_bot():
-    updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
-
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("profile", profile_command))
-    dispatcher.add_handler(CommandHandler("health", health_command))
-    dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(CommandHandler("logout", logout_command))
-
-    updater.start_polling()
-    updater.idle()
-
-
-# ====================
-# 📌 Вспомогательные функции
-# ====================
 
 def credentials_to_dict(credentials):
     return {
@@ -176,16 +105,79 @@ def credentials_to_dict(credentials):
     }
 
 
-# ====================
-# 📌 Запуск приложения
-# ====================
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('home'))
+
+
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    from telegram import Update
+    from telegram.ext import Dispatcher
+    
+    dispatcher = Dispatcher(bot, None, workers=0)
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return 'OK', 200
+
+
+# === Telegram Команды ===
+
+def start(update, context):
+    update.message.reply_text("Добро пожаловать в Health Assistant 360! 🚀")
+
+
+def profile_command(update, context):
+    update.message.reply_text("Пожалуйста, авторизуйтесь через Google: /google_auth")
+
+
+def health_command(update, context):
+    update.message.reply_text("Получение данных Google Fit. Пожалуйста, подождите...")
+
+
+def help_command(update, context):
+    update.message.reply_text(
+        "/start - Начать\n"
+        "/profile - Показать профиль\n"
+        "/health - Данные Google Fit\n"
+        "/logout - Выйти\n"
+        "/help - Справка"
+    )
+
+
+def logout_command(update, context):
+    session.clear()
+    update.message.reply_text("Вы вышли из системы. До встречи!")
+
+
+def start_telegram_bot():
+    updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
+
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("profile", profile_command))
+    dispatcher.add_handler(CommandHandler("health", health_command))
+    dispatcher.add_handler(CommandHandler("help", help_command))
+    dispatcher.add_handler(CommandHandler("logout", logout_command))
+
+    updater.start_webhook(
+        listen='0.0.0.0',
+        port=10000,
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=f"{WEBHOOK_URL}/telegram_webhook"
+    )
+    updater.idle()
+
+
+# === Запуск приложения ===
 
 if __name__ == '__main__':
     from threading import Thread
-
-    # Запуск Telegram бота в отдельном потоке
-    bot_thread = Thread(target=telegram_bot)
+    
+    # Запуск Telegram-бота в отдельном потоке
+    bot_thread = Thread(target=start_telegram_bot)
     bot_thread.start()
-
-    # Запуск Flask приложения
+    
+    # Запуск Flask-приложения
     app.run(host='0.0.0.0', port=10000)
