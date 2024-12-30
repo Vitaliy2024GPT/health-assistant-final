@@ -47,6 +47,7 @@ flow = Flow.from_client_config(
     redirect_uri=os.getenv('GOOGLE_AUTH_REDIRECT', 'https://health-assistant-final.onrender.com/googleauth/callback')
 )
 
+
 # Главная страница
 @app.route('/')
 def index():
@@ -72,18 +73,21 @@ def google_auth_callback():
 
     flow.fetch_token(authorization_response=request.url)
     credentials = flow.credentials
-    session['credentials'] = {
-        'token': credentials.token,
-        'refresh_token': credentials.refresh_token,
-        'token_uri': credentials.token_uri,
-        'client_id': credentials.client_id,
-        'client_secret': credentials.client_secret,
-        'scopes': credentials.scopes
-    }
+    user_id = session.get('user_id', 'default_user')
 
-    # Сохраняем в Redis
+    # Сохраняем токены в Redis
     if redis_client:
-        redis_client.set(f"user:{session['credentials']['token']}:google_credentials", json.dumps(session['credentials']))
+        redis_client.set(
+            f"user:{user_id}:google_credentials",
+            json.dumps({
+                'token': credentials.token,
+                'refresh_token': credentials.refresh_token,
+                'token_uri': credentials.token_uri,
+                'client_id': credentials.client_id,
+                'client_secret': credentials.client_secret,
+                'scopes': credentials.scopes
+            })
+        )
 
     return "Authorization successful! You can now return to the bot."
 
@@ -95,6 +99,7 @@ def telegram_webhook():
     if update and 'message' in update:
         message_text = update['message'].get('text', '')
         chat_id = update['message']['chat']['id']
+        session['user_id'] = str(chat_id)
 
         commands = {
             '/start': lambda: send_telegram_message(chat_id, "Добро пожаловать в Health Assistant 360! 🚀"),
@@ -126,23 +131,27 @@ def send_telegram_message(chat_id, text):
 
 # Показ профиля
 def show_profile(chat_id):
-    credentials = session.get('credentials')
+    user_id = str(chat_id)
+    credentials = load_google_credentials(user_id)
+
     if not credentials:
         auth_url = url_for('google_auth', _external=True)
         send_telegram_message(chat_id, f"Пожалуйста, пройдите авторизацию через Google: {auth_url}")
     else:
-        user_info_service = build('oauth2', 'v2', credentials=Credentials(**credentials))
+        user_info_service = build('oauth2', 'v2', credentials=credentials)
         user_info = user_info_service.userinfo().get().execute()
         send_telegram_message(chat_id, f"👤 Профиль:\nИмя: {user_info.get('name')}\nEmail: {user_info.get('email')}")
 
 
 # Показ данных о здоровье
 def show_health_data(chat_id):
-    credentials = session.get('credentials')
+    user_id = str(chat_id)
+    credentials = load_google_credentials(user_id)
+
     if not credentials:
         send_telegram_message(chat_id, "Требуется авторизация для доступа к данным Google Fit.")
     else:
-        fitness_service = build('fitness', 'v1', credentials=Credentials(**credentials))
+        fitness_service = build('fitness', 'v1', credentials=credentials)
         data = fitness_service.users().dataset().aggregate(
             userId='me',
             body={
@@ -153,6 +162,15 @@ def show_health_data(chat_id):
             }
         ).execute()
         send_telegram_message(chat_id, f"🏃 Данные здоровья:\n{json.dumps(data)}")
+
+
+# Загрузка данных Google OAuth из Redis
+def load_google_credentials(user_id):
+    if redis_client:
+        credentials_json = redis_client.get(f"user:{user_id}:google_credentials")
+        if credentials_json:
+            return Credentials(**json.loads(credentials_json))
+    return None
 
 
 # Команда помощи
