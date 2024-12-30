@@ -129,30 +129,14 @@ def telegram_webhook():
         if message_text == '/start':
             send_telegram_message(chat_id, "Добро пожаловать в Health Assistant 360! 🚀")
         elif message_text == '/profile':
-            credentials = session.get('credentials')
-            if not credentials:
-                auth_url = url_for('google_auth', _external=True)
-                send_telegram_message(
-                    chat_id,
-                    f"Пожалуйста, пройдите авторизацию через Google для просмотра профиля: {auth_url}"
-                )
-            else:
-                try:
-                    user_info_service = build('oauth2', 'v2', credentials=Credentials(**credentials))
-                    user_info = user_info_service.userinfo().get().execute()
-                    send_telegram_message(
-                        chat_id,
-                        f"👤 Профиль пользователя:\n"
-                        f"Имя: {user_info.get('name')}\n"
-                        f"Email: {user_info.get('email')}\n"
-                        f"Фото: {user_info.get('picture')}"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to fetch user profile: {e}")
-                    send_telegram_message(chat_id, "Ошибка при получении профиля. Пожалуйста, авторизуйтесь заново.")
+            show_profile(chat_id)
         elif message_text == '/logout':
             session.clear()
             send_telegram_message(chat_id, "Вы успешно вышли из системы.")
+        elif message_text == '/health':
+            show_health_data(chat_id)
+        elif message_text == '/help':
+            show_help(chat_id)
         else:
             send_telegram_message(chat_id, "Извините, я не понимаю эту команду.")
 
@@ -173,13 +157,43 @@ def send_telegram_message(chat_id, text):
         logger.error(f"Failed to send message: {response.text}")
 
 
-# Очистка сессий для тестирования
-@app.route('/clear_sessions')
-def clear_sessions():
-    session.clear()
-    return "Sessions cleared!"
+# Показ профиля
+def show_profile(chat_id):
+    credentials = session.get('credentials')
+    if not credentials:
+        auth_url = url_for('google_auth', _external=True)
+        send_telegram_message(chat_id, f"Пожалуйста, пройдите авторизацию через Google: {auth_url}")
+    else:
+        user_info_service = build('oauth2', 'v2', credentials=Credentials(**credentials))
+        user_info = user_info_service.userinfo().get().execute()
+        send_telegram_message(
+            chat_id,
+            f"👤 Профиль:\nИмя: {user_info.get('name')}\nEmail: {user_info.get('email')}"
+        )
 
 
-# Запуск приложения
+# Показ данных о здоровье
+def show_health_data(chat_id):
+    credentials = session.get('credentials')
+    if not credentials:
+        send_telegram_message(chat_id, "Требуется авторизация для доступа к данным Google Fit.")
+    else:
+        fitness_service = build('fitness', 'v1', credentials=Credentials(**credentials))
+        data = fitness_service.users().dataset().get(userId='me').execute()
+        send_telegram_message(chat_id, f"🏃 Данные здоровья:\n{data}")
+
+
+# Команда помощи
+def show_help(chat_id):
+    help_text = (
+        "/start - Начать\n"
+        "/profile - Показать профиль\n"
+        "/health - Данные Google Fit\n"
+        "/logout - Выйти\n"
+        "/help - Справка"
+    )
+    send_telegram_message(chat_id, help_text)
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000)))
