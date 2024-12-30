@@ -41,7 +41,6 @@ flow = Flow.from_client_config(
     redirect_uri=GOOGLE_AUTH_REDIRECT
 )
 
-
 # === Flask Маршруты ===
 
 @app.route('/')
@@ -149,6 +148,18 @@ def help_command(update, context):
 def logout_command(update, context):
     session.clear()
     update.message.reply_text("Вы вышли из системы. До встречи!")
+
+
+# Восстановленные недостающие функции
+def show_help(chat_id):
+    bot.send_message(chat_id=chat_id, text="""
+    Доступные команды:
+    /start - Начать
+    /profile - Показать профиль
+    /health - Показать данные Google Fit
+    /help - Показать помощь
+    /logout - Выйти
+    """)
 
 
 def start_telegram_bot():
