@@ -19,31 +19,22 @@ logger = logging.getLogger(__name__)
 
 # Инициализация Redis
 redis_url = os.getenv('REDIS_URL')
-if redis_url:
-    redis_client = redis.from_url(redis_url)
-else:
-    logger.warning("REDIS_URL is not set. Redis functionality will be disabled.")
-    redis_client = None
+redis_client = redis.from_url(redis_url) if redis_url else None
 
 # Настройка Flask-Session
 app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_USE_SIGNER'] = True
 app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
-app.config['SESSION_REDIS'] = redis_client if redis_client else None
+app.config['SESSION_REDIS'] = redis_client
 Session(app)
 
-# Чтение учетных данных Google из переменной окружения
+# Google OAuth 2.0
 google_credentials = os.getenv('GOOGLE_CREDENTIALS')
 if not google_credentials:
     raise ValueError("GOOGLE_CREDENTIALS environment variable is not set")
 
-try:
-    credentials_info = json.loads(google_credentials)
-except json.JSONDecodeError:
-    raise ValueError("Failed to parse GOOGLE_CREDENTIALS. Ensure it's a valid JSON string.")
-
-# Инициализация Google OAuth2 Flow
+credentials_info = json.loads(google_credentials)
 flow = Flow.from_client_config(
     credentials_info,
     scopes=[
@@ -61,62 +52,46 @@ flow = Flow.from_client_config(
 def index():
     return "Welcome to Health Assistant 360"
 
+
 # Google OAuth 2.0 авторизация
 @app.route('/google_auth')
 def google_auth():
-    logger.info("Starting Google OAuth flow")
     authorization_url, state = flow.authorization_url(
         access_type='offline',
         include_granted_scopes='true'
     )
     session['state'] = state
-    logger.info(f"OAuth state saved in session: {state}")
     return redirect(authorization_url)
+
 
 # Callback для Google OAuth
 @app.route('/googleauth/callback')
 def google_auth_callback():
-    logger.info("Handling Google OAuth callback")
-    session_state = session.get('state')
-    response_state = request.args.get('state')
-    logger.info(f"Session state: {session_state}, Response state: {response_state}")
-
-    if not session_state or session_state != response_state:
-        logger.error("State mismatch error during OAuth callback")
-        session.pop('state', None)
+    if session.get('state') != request.args.get('state'):
         return "State mismatch error. Please try again.", 400
 
-    try:
-        flow.fetch_token(authorization_response=request.url)
-        credentials = flow.credentials
-        session['credentials'] = {
-            'token': credentials.token,
-            'refresh_token': credentials.refresh_token,
-            'token_uri': credentials.token_uri,
-            'client_id': credentials.client_id,
-            'client_secret': credentials.client_secret,
-            'scopes': credentials.scopes
-        }
+    flow.fetch_token(authorization_response=request.url)
+    credentials = flow.credentials
+    session['credentials'] = {
+        'token': credentials.token,
+        'refresh_token': credentials.refresh_token,
+        'token_uri': credentials.token_uri,
+        'client_id': credentials.client_id,
+        'client_secret': credentials.client_secret,
+        'scopes': credentials.scopes
+    }
 
-        user_info_service = build('oauth2', 'v2', credentials=credentials)
-        user_info = user_info_service.userinfo().get().execute()
+    # Сохраняем в Redis
+    if redis_client:
+        redis_client.set(f"user:{session['credentials']['token']}:google_credentials", json.dumps(session['credentials']))
 
-        if redis_client:
-            redis_client.set(f"user:{user_info['email']}:google_credentials", json.dumps(session['credentials']))
+    return "Authorization successful! You can now return to the bot."
 
-        return jsonify(user_info)
-
-    except Exception as e:
-        logger.error(f"Failed during OAuth callback: {e}")
-        return f"Error during OAuth callback: {e}", 500
 
 # Telegram Webhook
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
-    logger.info("Received webhook update")
     update = request.get_json()
-    logger.info(update)
-
     if update and 'message' in update:
         message_text = update['message'].get('text', '')
         chat_id = update['message']['chat']['id']
@@ -134,7 +109,8 @@ def telegram_webhook():
 
     return jsonify({"status": "ok"})
 
-# Вспомогательная функция для отправки сообщений через Telegram
+
+# Вспомогательная функция для отправки сообщений
 def send_telegram_message(chat_id, text):
     telegram_token = os.getenv('TELEGRAM_TOKEN')
     if not telegram_token:
@@ -147,6 +123,7 @@ def send_telegram_message(chat_id, text):
     if response.status_code != 200:
         logger.error(f"Failed to send message: {response.text}")
 
+
 # Показ профиля
 def show_profile(chat_id):
     credentials = session.get('credentials')
@@ -156,10 +133,8 @@ def show_profile(chat_id):
     else:
         user_info_service = build('oauth2', 'v2', credentials=Credentials(**credentials))
         user_info = user_info_service.userinfo().get().execute()
-        send_telegram_message(
-            chat_id,
-            f"👤 Профиль:\nИмя: {user_info.get('name')}\nEmail: {user_info.get('email')}"
-        )
+        send_telegram_message(chat_id, f"👤 Профиль:\nИмя: {user_info.get('name')}\nEmail: {user_info.get('email')}")
+
 
 # Показ данных о здоровье
 def show_health_data(chat_id):
@@ -168,8 +143,17 @@ def show_health_data(chat_id):
         send_telegram_message(chat_id, "Требуется авторизация для доступа к данным Google Fit.")
     else:
         fitness_service = build('fitness', 'v1', credentials=Credentials(**credentials))
-        data = fitness_service.users().dataset().get(userId='me').execute()
-        send_telegram_message(chat_id, f"🏃 Данные здоровья:\n{data}")
+        data = fitness_service.users().dataset().aggregate(
+            userId='me',
+            body={
+                "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
+                "bucketByTime": {"durationMillis": 86400000},
+                "startTimeMillis": 0,
+                "endTimeMillis": 0
+            }
+        ).execute()
+        send_telegram_message(chat_id, f"🏃 Данные здоровья:\n{json.dumps(data)}")
+
 
 # Команда помощи
 def show_help(chat_id):
@@ -182,10 +166,12 @@ def show_help(chat_id):
     )
     send_telegram_message(chat_id, help_text)
 
+
 # Выход из системы
 def logout_user(chat_id):
     session.clear()
     send_telegram_message(chat_id, "Вы успешно вышли из системы.")
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000)))
