@@ -3,7 +3,6 @@ import json
 from flask import Flask, request, redirect, session, jsonify, url_for
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import redis
 import logging
@@ -104,7 +103,6 @@ def google_auth_callback():
         user_info_service = build('oauth2', 'v2', credentials=credentials)
         user_info = user_info_service.userinfo().get().execute()
 
-        # Сохранение данных пользователя в Redis
         if redis_client:
             redis_client.set(f"user:{user_info['email']}:google_credentials", json.dumps(session['credentials']))
 
@@ -126,19 +124,16 @@ def telegram_webhook():
         message_text = update['message'].get('text', '')
         chat_id = update['message']['chat']['id']
 
-        if message_text == '/start':
-            send_telegram_message(chat_id, "Добро пожаловать в Health Assistant 360! 🚀")
-        elif message_text == '/profile':
-            show_profile(chat_id)
-        elif message_text == '/logout':
-            session.clear()
-            send_telegram_message(chat_id, "Вы успешно вышли из системы.")
-        elif message_text == '/health':
-            show_health_data(chat_id)
-        elif message_text == '/help':
-            show_help(chat_id)
-        else:
-            send_telegram_message(chat_id, "Извините, я не понимаю эту команду.")
+        commands = {
+            '/start': lambda: send_telegram_message(chat_id, "Добро пожаловать в Health Assistant 360! 🚀"),
+            '/profile': lambda: show_profile(chat_id),
+            '/logout': lambda: logout_user(chat_id),
+            '/health': lambda: show_health_data(chat_id),
+            '/help': lambda: show_help(chat_id),
+        }
+
+        command = commands.get(message_text, lambda: send_telegram_message(chat_id, "Извините, я не понимаю эту команду."))
+        command()
 
     return jsonify({"status": "ok"})
 
@@ -193,6 +188,12 @@ def show_help(chat_id):
         "/help - Справка"
     )
     send_telegram_message(chat_id, help_text)
+
+
+# Выход из системы
+def logout_user(chat_id):
+    session.clear()
+    send_telegram_message(chat_id, "Вы успешно вышли из системы.")
 
 
 if __name__ == '__main__':
