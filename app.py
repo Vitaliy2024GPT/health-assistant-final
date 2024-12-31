@@ -57,6 +57,17 @@ try:
 except Exception as e:
     logger.error(f"❌ Google OAuth flow initialization failed: {e}")
 
+# === Вспомогательная функция для преобразования данных учетных данных ===
+def credentials_to_dict(credentials):
+    return {
+        'token': credentials.token,
+        'refresh_token': credentials.refresh_token,
+        'token_uri': credentials.token_uri,
+        'client_id': credentials.client_id,
+        'client_secret': credentials.client_secret,
+        'scopes': credentials.scopes
+    }
+
 # === Flask Маршруты ===
 
 @app.route('/')
@@ -67,13 +78,13 @@ def home():
 @app.route('/google_auth')
 def google_auth():
     try:
-        session.clear()  # Очистка старой сессии
+        session.clear()
         authorization_url, state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true'
         )
         session['state'] = state
-        session.modified = True  # Обновление сессии
+        session.modified = True
         logger.info(f"OAuth state сохранён: {state}")
         return redirect(authorization_url)
     except Exception as e:
@@ -96,12 +107,11 @@ def google_auth_callback():
             logger.error("Missing 'code' parameter in callback.")
             return "Missing 'code' parameter. Please try again.", 400
 
-        # Получаем токен
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
         session.pop('state', None)
-        session.modified = True  # Обновление сессии
+        session.modified = True
         logger.info("✅ OAuth авторизация успешно завершена.")
         return redirect(url_for('profile'))
 
@@ -171,6 +181,30 @@ def start(update, context):
 
 def profile_command(update, context):
     update.message.reply_text("Пожалуйста, авторизуйтесь через Google: /google_auth")
+
+
+def health_command(update, context):
+    update.message.reply_text("Получение данных Google Fit. Пожалуйста, подождите...")
+
+
+def help_command(update, context):
+    update.message.reply_text(
+        "/start - Начать\n"
+        "/profile - Показать профиль\n"
+        "/health - Данные Google Fit\n"
+        "/logout - Выйти\n"
+        "/help - Справка"
+    )
+
+
+def logout_command(update, context):
+    session.clear()
+    update.message.reply_text("Вы вышли из системы. До встречи!")
+
+
+def google_auth_command(update, context):
+    auth_url = GOOGLE_AUTH_REDIRECT
+    update.message.reply_text(f"Перейдите по ссылке для авторизации: {auth_url}")
 
 
 # === Запуск приложения ===
