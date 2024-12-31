@@ -83,17 +83,16 @@ def home():
 @app.route('/google_auth')
 def google_auth():
     try:
-        session.clear()  # Очистка старой сессии
+        session.clear()
         authorization_url, state = flow.authorization_url(
             access_type='offline',
-            include_granted_scopes='true'
+            include_granted_scopes='true',
+            prompt='consent'  # Принудительно запрашиваем refresh_token
         )
         session['state'] = state
         session.modified = True
         logger.info(f"✅ OAuth state сохранён: {state}")
         logger.info(f"✅ Session after saving state: {dict(session)}")
-        redis_client = redis.from_url(os.getenv('REDIS_URL'))
-        redis_client.set('oauth_state', state, ex=300)
         return redirect(authorization_url)
     except Exception as e:
         logger.error(f"❌ Ошибка Google OAuth: {e}")
@@ -109,31 +108,33 @@ def google_auth_callback():
         logger.info(f"🔄 Callback State: {state}, Session State: {session_state}")
         logger.info(f"🔄 Session data: {dict(session)}")
 
-        redis_client = redis.from_url(os.getenv('REDIS_URL'))
-        redis_state = redis_client.get('oauth_state')
-        if redis_state:
-            redis_state = redis_state.decode('utf-8')
-
-        logger.info(f"🔄 Redis State: {redis_state}")
-
         if not state:
             logger.error("❌ State отсутствует в запросе.")
             return "State is missing. Please try again.", 400
 
-        if state != redis_state:
-            logger.error(f"❌ State mismatch. Expected: {redis_state}, Got: {state}")
+        if not session_state:
+            logger.error("❌ State в сессии отсутствует.")
+            return "Session expired. Please start the authorization again.", 400
+
+        if state != session_state:
+            logger.error(f"❌ State mismatch. Expected: {session_state}, Got: {state}")
+            session.pop('state', None)
             return "State mismatch. Please try again.", 400
 
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
+
+        if not credentials.refresh_token:
+            logger.warning("❗ Refresh token отсутствует, возможно, требуется повторная авторизация.")
+
         session['credentials'] = credentials_to_dict(credentials)
+        session.pop('state', None)
         session.modified = True
-        redis_client.delete('oauth_state')
         logger.info("✅ OAuth авторизация успешно завершена.")
         return redirect(url_for('profile'))
-
     except Exception as e:
         logger.error(f"❌ Ошибка Google OAuth: {e}")
+        session.pop('state', None)
         return f"Ошибка Google OAuth: {e}", 500
 
 
@@ -146,6 +147,12 @@ def profile():
     service = build('oauth2', 'v2', credentials=credentials)
     user_info = service.userinfo().get().execute()
     return jsonify(user_info)
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('home'))
 
 
 # === Запуск приложения ===
