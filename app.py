@@ -28,7 +28,7 @@ try:
     app.config['SESSION_REDIS'] = redis.from_url(redis_url)
     app.config['SESSION_COOKIE_NAME'] = 'health_assistant_session'
     app.config['SESSION_COOKIE_HTTPONLY'] = True
-    app.config['SESSION_COOKIE_SECURE'] = False  # Установи True для HTTPS
+    app.config['SESSION_COOKIE_SECURE'] = False  # True, если используется HTTPS
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     Session(app)
     logger.info("✅ Redis session initialized successfully!")
@@ -61,8 +61,8 @@ try:
 except Exception as e:
     logger.error(f"❌ Google OAuth flow initialization failed: {e}")
 
-
 # === Вспомогательные функции ===
+
 def credentials_to_dict(credentials):
     return {
         'token': credentials.token,
@@ -73,8 +73,8 @@ def credentials_to_dict(credentials):
         'scopes': credentials.scopes
     }
 
-
 # === Flask Маршруты ===
+
 @app.route('/')
 def home():
     return "Health Assistant 360 is running!"
@@ -90,6 +90,7 @@ def google_auth():
         )
         session['state'] = state
         session.modified = True  # Обновление сессии
+        session.permanent = False  # Сессия временная
         logger.info(f"✅ OAuth state сохранён: {state}")
         logger.info(f"✅ Session after saving state: {dict(session)}")
         return redirect(authorization_url)
@@ -105,7 +106,7 @@ def google_auth_callback():
         session_state = session.get('state')
 
         logger.info(f"🔄 Callback State: {state}, Session State: {session_state}")
-        logger.info(f"🔄 Session data: {dict(session)}")
+        logger.info(f"🔄 Session data before check: {dict(session)}")
 
         if not state:
             logger.error("❌ State отсутствует в запросе.")
@@ -118,23 +119,27 @@ def google_auth_callback():
         if state != session_state:
             logger.error(f"❌ State mismatch. Expected: {session_state}, Got: {state}")
             session.pop('state', None)
+            session.modified = True
             return "State mismatch. Please try again.", 400
 
         if 'code' not in request.args:
             logger.error("❌ Missing 'code' parameter in callback.")
             return "Missing 'code' parameter. Please try again.", 400
 
+        # Получаем токен
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
         session.pop('state', None)
         session.modified = True
         logger.info("✅ OAuth авторизация успешно завершена.")
+        logger.info(f"🔄 Session data after successful auth: {dict(session)}")
         return redirect(url_for('profile'))
 
     except Exception as e:
         logger.error(f"❌ Ошибка Google OAuth: {e}")
         session.pop('state', None)
+        session.modified = True
         return f"Ошибка Google OAuth: {e}", 500
 
 
@@ -178,6 +183,9 @@ def telegram_webhook():
         dispatcher.add_handler(CommandHandler("start", start))
         dispatcher.add_handler(CommandHandler("profile", profile_command))
         dispatcher.add_handler(CommandHandler("health", health_command))
+        dispatcher.add_handler(CommandHandler("help", help_command))
+        dispatcher.add_handler(CommandHandler("logout", logout_command))
+        dispatcher.add_handler(CommandHandler("google_auth", google_auth_command))
         
         dispatcher.process_update(update)
         return 'OK', 200
@@ -188,6 +196,7 @@ def telegram_webhook():
 
 
 # === Telegram Команды ===
+
 def start(update, context):
     update.message.reply_text("Добро пожаловать в Health Assistant 360! 🚀")
 
@@ -196,6 +205,21 @@ def profile_command(update, context):
     update.message.reply_text("Пожалуйста, авторизуйтесь через Google: /google_auth")
 
 
+def health_command(update, context):
+    update.message.reply_text("Получение данных Google Fit. Пожалуйста, подождите...")
+
+
+def help_command(update, context):
+    update.message.reply_text(
+        "/start - Начать\n"
+        "/profile - Показать профиль\n"
+        "/health - Данные Google Fit\n"
+        "/logout - Выйти\n"
+        "/help - Справка"
+    )
+
+
 # === Запуск приложения ===
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
