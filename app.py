@@ -26,6 +26,10 @@ try:
     app.config['SESSION_USE_SIGNER'] = True
     app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
     app.config['SESSION_REDIS'] = redis.from_url(redis_url)
+    app.config['SESSION_COOKIE_NAME'] = 'health_assistant_session'
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SECURE'] = False  # Установи True для HTTPS
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     Session(app)
     logger.info("✅ Redis session initialized successfully!")
 except Exception as e:
@@ -79,13 +83,14 @@ def home():
 @app.route('/google_auth')
 def google_auth():
     try:
-        session.clear()  # Очистка старой сессии
+        session.clear()
         authorization_url, state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true'
         )
         session['state'] = state
-        session.modified = True  # Обновление сессии
+        session.modified = True
+        session.permanent = False
         logger.info(f"✅ OAuth state сохранён: {state}")
         return redirect(authorization_url)
     except Exception as e:
@@ -99,8 +104,8 @@ def google_auth_callback():
         state = request.args.get('state')
         session_state = session.get('state')
 
-        # Логирование состояния
-        logger.info(f"Callback State: {state}, Session State: {session_state}")
+        logger.info(f"🔄 Callback State: {state}, Session State: {session_state}")
+        logger.info(f"🔄 Session Data: {dict(session)}")
 
         if not state:
             logger.error("❌ State отсутствует в запросе.")
@@ -119,7 +124,6 @@ def google_auth_callback():
             logger.error("❌ Missing 'code' parameter in callback.")
             return "Missing 'code' parameter. Please try again.", 400
 
-        # Получаем токен
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
@@ -201,16 +205,7 @@ def health_command(update, context):
 
 
 def help_command(update, context):
-    update.message.reply_text(
-        "/start - Начать\n"
-        "/profile - Показать профиль\n"
-        "/health - Данные Google Fit\n"
-        "/logout - Выйти\n"
-        "/help - Справка"
-    )
-
-
-# === Запуск приложения ===
+    update.message.reply_text("/start - Начать\n/profile - Показать профиль\n/health - Данные Google Fit\n/logout - Выйти\n/help - Справка")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
