@@ -1,124 +1,162 @@
-from flask import Flask, redirect, request, session, url_for
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
-from flask_session import Session
-import redis
 import os
+import json
+from flask import Flask, request, redirect, session, jsonify, url_for
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+import redis
 import logging
+import requests
+from flask_session import Session
 
+# Инициализация приложения Flask
 app = Flask(__name__)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'supersecretkey')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersecretkey')
 
-# Конфигурация Redis для хранения сессий
+# Логирование
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Инициализация Redis
+redis_url = os.getenv('REDIS_URL')
+if redis_url:
+    redis_client = redis.from_url(redis_url)
+else:
+    logger.warning("REDIS_URL is not set. Redis functionality will be disabled.")
+    redis_client = None
+
+# Настройка Flask-Session
 app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_USE_SIGNER'] = True
 app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
-app.config['SESSION_REDIS'] = redis.StrictRedis(host='localhost', port=6379, db=0)
+app.config['SESSION_REDIS'] = redis_client if redis_client else None
 Session(app)
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
-app.logger.setLevel(logging.INFO)
+# Чтение учетных данных Google из переменной окружения
+google_credentials = os.getenv('GOOGLE_CREDENTIALS')
+if not google_credentials:
+    raise ValueError("GOOGLE_CREDENTIALS environment variable is not set")
 
-# OAuth параметры
-GOOGLE_CLIENT_SECRETS_FILE = 'client_secret.json'
-SCOPES = [
-    'https://www.googleapis.com/auth/userinfo.profile',
-    'https://www.googleapis.com/auth/userinfo.email',
-    'https://www.googleapis.com/auth/fitness.activity.read',
-    'https://www.googleapis.com/auth/fitness.body.read'
-]
-REDIRECT_URI = 'https://health-assistant-final.onrender.com/googleauth/callback'
+try:
+    credentials_info = json.loads(google_credentials)
+except json.JSONDecodeError:
+    raise ValueError("Failed to parse GOOGLE_CREDENTIALS. Ensure it's a valid JSON string.")
 
+# Инициализация Google OAuth2 Flow
+flow = Flow.from_client_config(
+    credentials_info,
+    scopes=[
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'openid',
+        'https://www.googleapis.com/auth/fitness.activity.read',
+        'https://www.googleapis.com/auth/fitness.body.read'
+    ],
+    redirect_uri=os.getenv('GOOGLE_AUTH_REDIRECT', 'https://health-assistant-final.onrender.com/googleauth/callback')
+)
 
-### 1. Маршрут для начала OAuth авторизации
+# Главная страница
+@app.route('/')
+def index():
+    return "Welcome to Health Assistant 360"
+
+# Google OAuth 2.0 авторизация
 @app.route('/google_auth')
 def google_auth():
-    flow = Flow.from_client_secrets_file(
-        GOOGLE_CLIENT_SECRETS_FILE,
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
-    )
-    auth_url, state = flow.authorization_url(
-        access_type='offline',  # Обязательно для получения refresh_token
-        include_granted_scopes='true',
-        prompt='consent'  # Принудительно запрашиваем повторное согласие
+    logger.info("Starting Google OAuth flow")
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
     )
     session['state'] = state
-    app.logger.info(f'🔑 OAuth state сохранён: {state}')
-    return redirect(auth_url)
+    logger.info(f"OAuth state saved in session: {state}")
+    return redirect(authorization_url)
 
-
-### 2. Маршрут для обработки ответа от Google
+# Callback для Google OAuth
 @app.route('/googleauth/callback')
-def callback():
-    state = session.get('state')
-    if not state:
-        app.logger.error('❌ State отсутствует в сессии.')
-        return 'Ошибка: State отсутствует в сессии.', 400
+def google_auth_callback():
+    logger.info("Handling Google OAuth callback")
+    session_state = session.get('state')
+    response_state = request.args.get('state')
+    logger.info(f"Session state: {session_state}, Response state: {response_state}")
 
-    flow = Flow.from_client_secrets_file(
-        GOOGLE_CLIENT_SECRETS_FILE,
-        scopes=SCOPES,
-        state=state,
-        redirect_uri=REDIRECT_URI
-    )
-    flow.fetch_token(authorization_response=request.url)
+    if not session_state or session_state != response_state:
+        logger.error("State mismatch error during OAuth callback")
+        session.pop('state', None)
+        return "State mismatch error. Please try again.", 400
 
-    credentials = flow.credentials
-    session['credentials'] = {
-        'token': credentials.token,
-        'refresh_token': credentials.refresh_token,  # Должен быть сохранён
-        'token_uri': credentials.token_uri,
-        'client_id': credentials.client_id,
-        'client_secret': credentials.client_secret,
-        'scopes': credentials.scopes
-    }
+    try:
+        flow.fetch_token(authorization_response=request.url)
+        credentials = flow.credentials
+        session['credentials'] = {
+            'token': credentials.token,
+            'refresh_token': credentials.refresh_token,
+            'token_uri': credentials.token_uri,
+            'client_id': credentials.client_id,
+            'client_secret': credentials.client_secret,
+            'scopes': credentials.scopes
+        }
 
-    if not credentials.refresh_token:
-        app.logger.error('❌ Отсутствует refresh_token.')
-        return 'Ошибка: Отсутствует refresh_token.', 400
+        user_info_service = build('oauth2', 'v2', credentials=credentials)
+        user_info = user_info_service.userinfo().get().execute()
 
-    app.logger.info('✅ OAuth авторизация успешно завершена.')
-    return redirect('/profile')
+        if redis_client:
+            redis_client.set(f"user:{user_info['email']}:google_credentials", json.dumps(session['credentials']))
 
+        return jsonify(user_info)
 
-### 3. Маршрут для отображения профиля пользователя
-@app.route('/profile')
-def profile():
-    credentials_data = session.get('credentials')
-    if not credentials_data:
-        app.logger.error('❌ Отсутствуют учётные данные.')
-        return redirect('/google_auth')
+    except Exception as e:
+        logger.error(f"Failed during OAuth callback: {e}")
+        return f"Error during OAuth callback: {e}", 500
 
-    credentials = Credentials(
-        token=credentials_data['token'],
-        refresh_token=credentials_data['refresh_token'],
-        token_uri=credentials_data['token_uri'],
-        client_id=credentials_data['client_id'],
-        client_secret=credentials_data['client_secret'],
-        scopes=credentials_data['scopes']
-    )
+# Telegram Webhook
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    logger.info("Received webhook update")
+    update = request.get_json()
+    logger.info(update)
 
-    if not credentials.refresh_token:
-        app.logger.error('❌ Отсутствует refresh_token.')
-        return 'Ошибка: Отсутствует refresh_token', 400
+    if update and 'message' in update:
+        message_text = update['message'].get('text', '')
+        chat_id = update['message']['chat']['id']
 
-    from googleapiclient.discovery import build
-    service = build('oauth2', 'v2', credentials=credentials)
-    user_info = service.userinfo().get().execute()
+        commands = {
+            '/start': lambda: send_telegram_message(chat_id, "Добро пожаловать в Health Assistant 360! 🚀"),
+            '/profile': lambda: show_profile(chat_id),
+            '/logout': lambda: logout_user(chat_id),
+            '/health': lambda: show_health_data(chat_id),
+            '/help': lambda: show_help(chat_id),
+        }
 
-    return f"Добро пожаловать, {user_info['name']}! Ваш email: {user_info['email']}"
+        command = commands.get(message_text, lambda: send_telegram_message(chat_id, "Извините, я не понимаю эту команду."))
+        command()
 
+    return jsonify({"status": "ok"})
 
-### 4. Маршрут для выхода из системы
-@app.route('/logout')
-def logout():
-    session.clear()
-    app.logger.info('✅ Сессия очищена.')
-    return redirect('/')
+# Вспомогательные функции
 
+def send_telegram_message(chat_id, text):
+    telegram_token = os.getenv('TELEGRAM_TOKEN')
+    if not telegram_token:
+        logger.error("TELEGRAM_TOKEN is not set")
+        return
+
+    url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+    payload = {'chat_id': chat_id, 'text': text}
+    response = requests.post(url, json=payload)
+    if response.status_code != 200:
+        logger.error(f"Failed to send message: {response.text}")
+
+def show_profile(chat_id):
+    credentials = session.get('credentials')
+    if not credentials:
+        auth_url = url_for('google_auth', _external=True)
+        send_telegram_message(chat_id, f"Пожалуйста, пройдите авторизацию через Google: {auth_url}")
+    else:
+        user_info_service = build('oauth2', 'v2', credentials=Credentials(**credentials))
+        user_info = user_info_service.userinfo().get().execute()
+        send_telegram_message(chat_id, f"👤 Профиль:\nИмя: {user_info.get('name')}\nEmail: {user_info.get('email')}")
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000, debug=True)
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000)))
