@@ -77,7 +77,8 @@ def google_auth():
         authorization_url, state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
-            prompt='consent'  # Принудительный запрос refresh_token
+            prompt='consent',
+            approval_prompt='force'  # Принудительно запрашивает refresh_token
         )
         
         # Сохраняем state в Redis
