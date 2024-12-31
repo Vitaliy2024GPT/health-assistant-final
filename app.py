@@ -4,20 +4,18 @@ from flask_session import Session
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler
 import redis
 import logging
 
-# === Настройка логирования ===
+# === Логирование ===
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# === Инициализация Flask-приложения ===
+# === Инициализация Flask ===
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY')
 
-# === Настройка сессий ===
+# === Настройка Redis и сессий ===
 try:
     redis_url = os.getenv('REDIS_URL')
     app.config['SESSION_TYPE'] = 'redis'
@@ -34,16 +32,10 @@ try:
 except Exception as e:
     logger.error(f"❌ Redis session initialization failed: {e}")
 
-# === Настройка Telegram-бота ===
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-bot = Bot(token=TELEGRAM_TOKEN)
-
-# === Google OAuth 2.0 ===
+# === Google OAuth ===
 GOOGLE_AUTH_REDIRECT = os.getenv('GOOGLE_AUTH_REDIRECT')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 
-# === Google OAuth Flow ===
 try:
     flow = Flow.from_client_config(
         client_config=eval(GOOGLE_CREDENTIALS),
@@ -61,7 +53,6 @@ except Exception as e:
     logger.error(f"❌ Google OAuth flow initialization failed: {e}")
 
 # === Вспомогательные функции ===
-
 def credentials_to_dict(credentials):
     return {
         'token': credentials.token,
@@ -72,8 +63,7 @@ def credentials_to_dict(credentials):
         'scopes': credentials.scopes
     }
 
-# === Flask Маршруты ===
-
+# === Маршруты ===
 @app.route('/')
 def home():
     return "Health Assistant 360 is running!"
@@ -86,12 +76,17 @@ def google_auth():
         authorization_url, state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
-            prompt='consent'  # Принудительно запрашиваем refresh_token
+            prompt='consent'  # Принудительный запрос refresh_token
         )
         session['state'] = state
         session.modified = True
+
+        # Логируем сессию и Redis-состояние
         logger.info(f"✅ OAuth state сохранён: {state}")
-        logger.info(f"✅ Session after saving state: {dict(session)}")
+        logger.info(f"✅ Session после сохранения state: {dict(session)}")
+        redis_client = redis.from_url(redis_url)
+        logger.info(f"✅ Redis ключи: {redis_client.keys('*')}")
+
         return redirect(authorization_url)
     except Exception as e:
         logger.error(f"❌ Ошибка Google OAuth: {e}")
@@ -124,7 +119,7 @@ def google_auth_callback():
         credentials = flow.credentials
 
         if not credentials.refresh_token:
-            logger.warning("❗ Refresh token отсутствует, возможно, требуется повторная авторизация.")
+            logger.warning("❗ Refresh token отсутствует. Потребуется повторная авторизация.")
 
         session['credentials'] = credentials_to_dict(credentials)
         session.pop('state', None)
@@ -140,12 +135,22 @@ def google_auth_callback():
 @app.route('/profile')
 def profile():
     if 'credentials' not in session:
+        logger.error("❌ Нет данных учетных данных в сессии.")
         return redirect(url_for('google_auth'))
     
     credentials = Credentials(**session['credentials'])
-    service = build('oauth2', 'v2', credentials=credentials)
-    user_info = service.userinfo().get().execute()
-    return jsonify(user_info)
+
+    if not credentials.refresh_token:
+        logger.error("❌ Отсутствует refresh_token.")
+        return "Ошибка: отсутствует refresh_token. Повторите авторизацию.", 400
+
+    try:
+        service = build('oauth2', 'v2', credentials=credentials)
+        user_info = service.userinfo().get().execute()
+        return jsonify(user_info)
+    except Exception as e:
+        logger.error(f"❌ Ошибка профиля: {e}")
+        return f"Ошибка профиля: {e}", 500
 
 
 @app.route('/logout')
@@ -155,6 +160,5 @@ def logout():
 
 
 # === Запуск приложения ===
-
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
