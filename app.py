@@ -28,6 +28,7 @@ try:
     app.config['SESSION_COOKIE_SECURE'] = False
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     Session(app)
+    redis_client = redis.from_url(redis_url)
     logger.info("✅ Redis session initialized successfully!")
 except Exception as e:
     logger.error(f"❌ Redis session initialization failed: {e}")
@@ -78,13 +79,14 @@ def google_auth():
             include_granted_scopes='true',
             prompt='consent'  # Принудительный запрос refresh_token
         )
+        
+        # Сохраняем state в Redis
+        redis_client.setex(f"oauth_state:{state}", 300, state)  # Сохраняем на 5 минут
         session['state'] = state
         session.modified = True
 
-        # Логируем сессию и Redis-состояние
         logger.info(f"✅ OAuth state сохранён: {state}")
         logger.info(f"✅ Session после сохранения state: {dict(session)}")
-        redis_client = redis.from_url(redis_url)
         logger.info(f"✅ Redis ключи: {redis_client.keys('*')}")
 
         return redirect(authorization_url)
@@ -101,29 +103,34 @@ def google_auth_callback():
 
         logger.info(f"🔄 Callback State: {state}, Session State: {session_state}")
         logger.info(f"🔄 Session data: {dict(session)}")
+        logger.info(f"🔄 Redis ключи: {redis_client.keys('*')}")
 
         if not state:
             logger.error("❌ State отсутствует в запросе.")
             return "State is missing. Please try again.", 400
 
-        if not session_state:
-            logger.error("❌ State в сессии отсутствует.")
+        # Проверка state в Redis
+        redis_state = redis_client.get(f"oauth_state:{state}")
+        if not redis_state:
+            logger.error("❌ State отсутствует в Redis.")
             return "Session expired. Please start the authorization again.", 400
 
-        if state != session_state:
-            logger.error(f"❌ State mismatch. Expected: {session_state}, Got: {state}")
-            session.pop('state', None)
+        if state != redis_state.decode('utf-8'):
+            logger.error(f"❌ State mismatch. Expected: {redis_state}, Got: {state}")
             return "State mismatch. Please try again.", 400
 
+        # Получаем токен
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
 
         if not credentials.refresh_token:
-            logger.warning("❗ Refresh token отсутствует. Потребуется повторная авторизация.")
+            logger.warning("❗ Refresh token отсутствует. Повторная авторизация может потребоваться позже.")
 
         session['credentials'] = credentials_to_dict(credentials)
         session.pop('state', None)
         session.modified = True
+        redis_client.delete(f"oauth_state:{state}")
+
         logger.info("✅ OAuth авторизация успешно завершена.")
         return redirect(url_for('profile'))
     except Exception as e:
