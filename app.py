@@ -28,7 +28,7 @@ try:
     app.config['SESSION_REDIS'] = redis.from_url(redis_url)
     app.config['SESSION_COOKIE_NAME'] = 'health_assistant_session'
     app.config['SESSION_COOKIE_HTTPONLY'] = True
-    app.config['SESSION_COOKIE_SECURE'] = False  # True, если используется HTTPS
+    app.config['SESSION_COOKIE_SECURE'] = False
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     Session(app)
     logger.info("✅ Redis session initialized successfully!")
@@ -89,10 +89,11 @@ def google_auth():
             include_granted_scopes='true'
         )
         session['state'] = state
-        session.modified = True  # Обновление сессии
-        session.permanent = False  # Сессия временная
+        session.modified = True
         logger.info(f"✅ OAuth state сохранён: {state}")
         logger.info(f"✅ Session after saving state: {dict(session)}")
+        redis_client = redis.from_url(os.getenv('REDIS_URL'))
+        redis_client.set('oauth_state', state, ex=300)
         return redirect(authorization_url)
     except Exception as e:
         logger.error(f"❌ Ошибка Google OAuth: {e}")
@@ -106,40 +107,33 @@ def google_auth_callback():
         session_state = session.get('state')
 
         logger.info(f"🔄 Callback State: {state}, Session State: {session_state}")
-        logger.info(f"🔄 Session data before check: {dict(session)}")
+        logger.info(f"🔄 Session data: {dict(session)}")
+
+        redis_client = redis.from_url(os.getenv('REDIS_URL'))
+        redis_state = redis_client.get('oauth_state')
+        if redis_state:
+            redis_state = redis_state.decode('utf-8')
+
+        logger.info(f"🔄 Redis State: {redis_state}")
 
         if not state:
             logger.error("❌ State отсутствует в запросе.")
             return "State is missing. Please try again.", 400
 
-        if not session_state:
-            logger.error("❌ State в сессии отсутствует.")
-            return "Session expired. Please start the authorization again.", 400
-
-        if state != session_state:
-            logger.error(f"❌ State mismatch. Expected: {session_state}, Got: {state}")
-            session.pop('state', None)
-            session.modified = True
+        if state != redis_state:
+            logger.error(f"❌ State mismatch. Expected: {redis_state}, Got: {state}")
             return "State mismatch. Please try again.", 400
 
-        if 'code' not in request.args:
-            logger.error("❌ Missing 'code' parameter in callback.")
-            return "Missing 'code' parameter. Please try again.", 400
-
-        # Получаем токен
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
-        session.pop('state', None)
         session.modified = True
+        redis_client.delete('oauth_state')
         logger.info("✅ OAuth авторизация успешно завершена.")
-        logger.info(f"🔄 Session data after successful auth: {dict(session)}")
         return redirect(url_for('profile'))
 
     except Exception as e:
         logger.error(f"❌ Ошибка Google OAuth: {e}")
-        session.pop('state', None)
-        session.modified = True
         return f"Ошибка Google OAuth: {e}", 500
 
 
@@ -152,71 +146,6 @@ def profile():
     service = build('oauth2', 'v2', credentials=credentials)
     user_info = service.userinfo().get().execute()
     return jsonify(user_info)
-
-
-@app.route('/health')
-def health():
-    if 'credentials' not in session:
-        return redirect(url_for('google_auth'))
-    
-    credentials = Credentials(**session['credentials'])
-    fitness_service = build('fitness', 'v1', credentials=credentials)
-    data = fitness_service.users().dataset().aggregate(userId='me', body={
-        "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
-        "bucketByTime": {"durationMillis": 86400000},
-    }).execute()
-    return jsonify(data)
-
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('home'))
-
-
-@app.route('/telegram_webhook', methods=['POST'])
-def telegram_webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), bot)
-        dispatcher = Dispatcher(bot, None, workers=1)
-        
-        dispatcher.add_handler(CommandHandler("start", start))
-        dispatcher.add_handler(CommandHandler("profile", profile_command))
-        dispatcher.add_handler(CommandHandler("health", health_command))
-        dispatcher.add_handler(CommandHandler("help", help_command))
-        dispatcher.add_handler(CommandHandler("logout", logout_command))
-        dispatcher.add_handler(CommandHandler("google_auth", google_auth_command))
-        
-        dispatcher.process_update(update)
-        return 'OK', 200
-    
-    except Exception as e:
-        logger.error(f"❌ Ошибка в telegram_webhook: {e}")
-        return f"Internal Server Error: {e}", 500
-
-
-# === Telegram Команды ===
-
-def start(update, context):
-    update.message.reply_text("Добро пожаловать в Health Assistant 360! 🚀")
-
-
-def profile_command(update, context):
-    update.message.reply_text("Пожалуйста, авторизуйтесь через Google: /google_auth")
-
-
-def health_command(update, context):
-    update.message.reply_text("Получение данных Google Fit. Пожалуйста, подождите...")
-
-
-def help_command(update, context):
-    update.message.reply_text(
-        "/start - Начать\n"
-        "/profile - Показать профиль\n"
-        "/health - Данные Google Fit\n"
-        "/logout - Выйти\n"
-        "/help - Справка"
-    )
 
 
 # === Запуск приложения ===
