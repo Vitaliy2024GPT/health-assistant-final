@@ -6,7 +6,6 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from telegram import Bot, Update
 from telegram.ext import Dispatcher, CommandHandler
-from threading import Thread
 import redis
 import logging
 
