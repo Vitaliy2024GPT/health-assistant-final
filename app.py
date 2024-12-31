@@ -19,12 +19,17 @@ app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY')
 
 # === Настройка сессий ===
-app.config['SESSION_TYPE'] = 'redis'
-app.config['SESSION_PERMANENT'] = False
-app.config['SESSION_USE_SIGNER'] = True
-app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
-app.config['SESSION_REDIS'] = redis.from_url(os.getenv('REDIS_URL'))
-Session(app)
+try:
+    redis_url = os.getenv('REDIS_URL')
+    app.config['SESSION_TYPE'] = 'redis'
+    app.config['SESSION_PERMANENT'] = False
+    app.config['SESSION_USE_SIGNER'] = True
+    app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
+    app.config['SESSION_REDIS'] = redis.from_url(redis_url)
+    Session(app)
+    logger.info("✅ Redis session initialized successfully!")
+except Exception as e:
+    logger.error(f"❌ Redis session initialization failed: {e}")
 
 # === Настройка Telegram-бота ===
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -36,17 +41,21 @@ GOOGLE_AUTH_REDIRECT = os.getenv('GOOGLE_AUTH_REDIRECT')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 
 # === Google OAuth Flow ===
-flow = Flow.from_client_config(
-    client_config=eval(GOOGLE_CREDENTIALS),
-    scopes=[
-        "https://www.googleapis.com/auth/fitness.activity.read",
-        "https://www.googleapis.com/auth/fitness.body.read",
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile",
-        "openid"
-    ],
-    redirect_uri=GOOGLE_AUTH_REDIRECT
-)
+try:
+    flow = Flow.from_client_config(
+        client_config=eval(GOOGLE_CREDENTIALS),
+        scopes=[
+            "https://www.googleapis.com/auth/fitness.activity.read",
+            "https://www.googleapis.com/auth/fitness.body.read",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile",
+            "openid"
+        ],
+        redirect_uri=GOOGLE_AUTH_REDIRECT
+    )
+    logger.info("✅ Google OAuth flow initialized successfully!")
+except Exception as e:
+    logger.error(f"❌ Google OAuth flow initialization failed: {e}")
 
 # === Flask Маршруты ===
 
@@ -63,7 +72,7 @@ def google_auth():
             include_granted_scopes='true'
         )
         session['state'] = state
-        session.modified = True  # Гарантируем сохранение сессии
+        session.modified = True  # Обновление сессии
         logger.info(f"OAuth state сохранён: {state}")
         return redirect(authorization_url)
     except Exception as e:
@@ -91,7 +100,8 @@ def google_auth_callback():
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
         session.pop('state', None)
-        logger.info("OAuth авторизация успешно завершена.")
+        session.modified = True  # Обновление сессии
+        logger.info("✅ OAuth авторизация успешно завершена.")
         return redirect(url_for('profile'))
 
     except Exception as e:
@@ -140,62 +150,6 @@ def credentials_to_dict(credentials):
 def logout():
     session.clear()
     return redirect(url_for('home'))
-
-
-@app.route('/telegram_webhook', methods=['POST'])
-def telegram_webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), bot)
-        dispatcher = Dispatcher(bot, None, workers=1)
-        
-        dispatcher.add_handler(CommandHandler("start", start))
-        dispatcher.add_handler(CommandHandler("profile", profile_command))
-        dispatcher.add_handler(CommandHandler("health", health_command))
-        dispatcher.add_handler(CommandHandler("help", help_command))
-        dispatcher.add_handler(CommandHandler("logout", logout_command))
-        dispatcher.add_handler(CommandHandler("google_auth", google_auth_command))
-        
-        dispatcher.process_update(update)
-        
-        return 'OK', 200
-    
-    except Exception as e:
-        logger.error(f"Ошибка в telegram_webhook: {e}")
-        return f"Internal Server Error: {e}", 500
-
-
-# === Telegram Команды ===
-
-def start(update, context):
-    update.message.reply_text("Добро пожаловать в Health Assistant 360! 🚀")
-
-
-def profile_command(update, context):
-    update.message.reply_text("Пожалуйста, авторизуйтесь через Google: /google_auth")
-
-
-def health_command(update, context):
-    update.message.reply_text("Получение данных Google Fit. Пожалуйста, подождите...")
-
-
-def help_command(update, context):
-    update.message.reply_text(
-        "/start - Начать\n"
-        "/profile - Показать профиль\n"
-        "/health - Данные Google Fit\n"
-        "/logout - Выйти\n"
-        "/help - Справка"
-    )
-
-
-def logout_command(update, context):
-    session.clear()
-    update.message.reply_text("Вы вышли из системы. До встречи!")
-
-
-def google_auth_command(update, context):
-    auth_url = GOOGLE_AUTH_REDIRECT
-    update.message.reply_text(f"Перейдите по ссылке для авторизации: {auth_url}")
 
 
 # === Запуск приложения ===
