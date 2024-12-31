@@ -32,18 +32,16 @@ except Exception as e:
     logger.error(f"❌ Redis session initialization failed: {e}")
 
 # === Настройка Telegram-бота ===
-try:
-    TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-    WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-    bot = Bot(token=TELEGRAM_TOKEN)
-    logger.info("✅ Telegram bot initialized successfully!")
-except Exception as e:
-    logger.error(f"❌ Telegram bot initialization failed: {e}")
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+bot = Bot(token=TELEGRAM_TOKEN)
 
 # === Google OAuth 2.0 ===
+GOOGLE_AUTH_REDIRECT = os.getenv('GOOGLE_AUTH_REDIRECT')
+GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
+
+# === Google OAuth Flow ===
 try:
-    GOOGLE_AUTH_REDIRECT = os.getenv('GOOGLE_AUTH_REDIRECT')
-    GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
     flow = Flow.from_client_config(
         client_config=eval(GOOGLE_CREDENTIALS),
         scopes=[
@@ -58,6 +56,18 @@ try:
     logger.info("✅ Google OAuth flow initialized successfully!")
 except Exception as e:
     logger.error(f"❌ Google OAuth flow initialization failed: {e}")
+
+# === Вспомогательные функции ===
+
+def credentials_to_dict(credentials):
+    return {
+        'token': credentials.token,
+        'refresh_token': credentials.refresh_token,
+        'token_uri': credentials.token_uri,
+        'client_id': credentials.client_id,
+        'client_secret': credentials.client_secret,
+        'scopes': credentials.scopes
+    }
 
 # === Flask Маршруты ===
 
@@ -76,10 +86,10 @@ def google_auth():
         )
         session['state'] = state
         session.modified = True  # Обновление сессии
-        logger.info(f"OAuth state сохранён: {state}")
+        logger.info(f"✅ OAuth state сохранён: {state}")
         return redirect(authorization_url)
     except Exception as e:
-        logger.error(f"Ошибка Google OAuth: {e}")
+        logger.error(f"❌ Ошибка Google OAuth: {e}")
         return f"Ошибка Google OAuth: {e}", 500
 
 
@@ -89,18 +99,24 @@ def google_auth_callback():
         state = request.args.get('state')
         session_state = session.get('state')
 
+        # Логирование состояния
+        logger.info(f"Callback State: {state}, Session State: {session_state}")
+
         if not state:
-            logger.error("State отсутствует в запросе.")
-            session.pop('state', None)
+            logger.error("❌ State отсутствует в запросе.")
             return "State is missing. Please try again.", 400
 
+        if not session_state:
+            logger.error("❌ State в сессии отсутствует.")
+            return "Session expired. Please start the authorization again.", 400
+
         if state != session_state:
-            logger.error(f"State mismatch. Expected: {session_state}, Got: {state}")
+            logger.error(f"❌ State mismatch. Expected: {session_state}, Got: {state}")
             session.pop('state', None)
             return "State mismatch. Please try again.", 400
 
         if 'code' not in request.args:
-            logger.error("Missing 'code' parameter in callback.")
+            logger.error("❌ Missing 'code' parameter in callback.")
             return "Missing 'code' parameter. Please try again.", 400
 
         # Получаем токен
@@ -113,7 +129,7 @@ def google_auth_callback():
         return redirect(url_for('profile'))
 
     except Exception as e:
-        logger.error(f"Ошибка Google OAuth: {e}")
+        logger.error(f"❌ Ошибка Google OAuth: {e}")
         session.pop('state', None)
         return f"Ошибка Google OAuth: {e}", 500
 
@@ -166,7 +182,7 @@ def telegram_webhook():
         return 'OK', 200
     
     except Exception as e:
-        logger.error(f"Ошибка в telegram_webhook: {e}")
+        logger.error(f"❌ Ошибка в telegram_webhook: {e}")
         return f"Internal Server Error: {e}", 500
 
 
@@ -192,16 +208,6 @@ def help_command(update, context):
         "/logout - Выйти\n"
         "/help - Справка"
     )
-
-
-def logout_command(update, context):
-    session.clear()
-    update.message.reply_text("Вы вышли из системы. До встречи!")
-
-
-def google_auth_command(update, context):
-    auth_url = GOOGLE_AUTH_REDIRECT
-    update.message.reply_text(f"Перейдите по ссылке для авторизации: {auth_url}")
 
 
 # === Запуск приложения ===
