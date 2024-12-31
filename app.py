@@ -41,7 +41,9 @@ flow = Flow.from_client_config(
     scopes=[
         "https://www.googleapis.com/auth/fitness.activity.read",
         "https://www.googleapis.com/auth/fitness.body.read",
-        "openid", "email", "profile"
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "openid"
     ],
     redirect_uri=GOOGLE_AUTH_REDIRECT
 )
