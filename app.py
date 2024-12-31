@@ -32,16 +32,18 @@ except Exception as e:
     logger.error(f"❌ Redis session initialization failed: {e}")
 
 # === Настройка Telegram-бота ===
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-bot = Bot(token=TELEGRAM_TOKEN)
+try:
+    TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+    WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+    bot = Bot(token=TELEGRAM_TOKEN)
+    logger.info("✅ Telegram bot initialized successfully!")
+except Exception as e:
+    logger.error(f"❌ Telegram bot initialization failed: {e}")
 
 # === Google OAuth 2.0 ===
-GOOGLE_AUTH_REDIRECT = os.getenv('GOOGLE_AUTH_REDIRECT')
-GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
-
-# === Google OAuth Flow ===
 try:
+    GOOGLE_AUTH_REDIRECT = os.getenv('GOOGLE_AUTH_REDIRECT')
+    GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
     flow = Flow.from_client_config(
         client_config=eval(GOOGLE_CREDENTIALS),
         scopes=[
@@ -57,17 +59,6 @@ try:
 except Exception as e:
     logger.error(f"❌ Google OAuth flow initialization failed: {e}")
 
-# === Вспомогательная функция для преобразования данных учетных данных ===
-def credentials_to_dict(credentials):
-    return {
-        'token': credentials.token,
-        'refresh_token': credentials.refresh_token,
-        'token_uri': credentials.token_uri,
-        'client_id': credentials.client_id,
-        'client_secret': credentials.client_secret,
-        'scopes': credentials.scopes
-    }
-
 # === Flask Маршруты ===
 
 @app.route('/')
@@ -78,13 +69,13 @@ def home():
 @app.route('/google_auth')
 def google_auth():
     try:
-        session.clear()
+        session.clear()  # Очистка старой сессии
         authorization_url, state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true'
         )
         session['state'] = state
-        session.modified = True
+        session.modified = True  # Обновление сессии
         logger.info(f"OAuth state сохранён: {state}")
         return redirect(authorization_url)
     except Exception as e:
@@ -98,7 +89,12 @@ def google_auth_callback():
         state = request.args.get('state')
         session_state = session.get('state')
 
-        if not state or state != session_state:
+        if not state:
+            logger.error("State отсутствует в запросе.")
+            session.pop('state', None)
+            return "State is missing. Please try again.", 400
+
+        if state != session_state:
             logger.error(f"State mismatch. Expected: {session_state}, Got: {state}")
             session.pop('state', None)
             return "State mismatch. Please try again.", 400
@@ -107,6 +103,7 @@ def google_auth_callback():
             logger.error("Missing 'code' parameter in callback.")
             return "Missing 'code' parameter. Please try again.", 400
 
+        # Получаем токен
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         session['credentials'] = credentials_to_dict(credentials)
