@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, session
+from flask import Flask, request, redirect, url_for, session, jsonify
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -34,6 +34,25 @@ def get_flow():
         redirect_uri=REDIRECT_URI
     )
 
+# Команды Telegram
+def process_command(chat_id, text):
+    if text == '/start':
+        return "Добро пожаловать в Health Assistant 360! 🚀"
+    elif text == '/help':
+        return '''🛠 Доступные команды:
+    /start - Начать взаимодействие
+    /profile - Показать профиль
+    /health - Показать данные о здоровье
+    /logout - Выйти из системы
+    /help - Показать это сообщение'''
+    elif text == '/profile':
+        return f"https://health-assistant-final.onrender.com/profile?chat_id={chat_id}"
+    elif text == '/health':
+        return f"https://health-assistant-final.onrender.com/health?chat_id={chat_id}"
+    else:
+        return "Неизвестная команда. Используйте /help для списка доступных команд."
+
+# Маршруты API
 @app.route('/start')
 def start():
     return "Добро пожаловать в Health Assistant 360! 🚀"
@@ -103,12 +122,13 @@ def logout():
     redis_client.delete(f'user:{chat_id}:name')
     return "Вы успешно вышли из системы!"
 
+# Маршрут для Telegram webhook
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     data = request.get_json()
     if not data:
         app.logger.error("Empty or invalid webhook payload.")
-        return "Invalid payload", 400
+        return jsonify({"error": "Invalid payload"}), 400
     
     message = data.get('message', {})
     text = message.get('text', '')
@@ -116,23 +136,15 @@ def telegram_webhook():
     
     if not chat_id:
         app.logger.error("Chat ID not found in webhook payload.")
-        return "Missing chat ID", 400
+        return jsonify({"error": "Missing chat ID"}), 400
     
-    if text == '/start':
-        return "Добро пожаловать в Health Assistant 360! 🚀"
-    elif text == '/help':
-        return '''🛠 Доступные команды:
-    /start - Начать взаимодействие
-    /profile - Показать профиль
-    /health - Показать данные о здоровье
-    /logout - Выйти из системы
-    /help - Показать это сообщение'''
-    elif text == '/profile':
-        return redirect(f"/profile?chat_id={chat_id}")
-    elif text == '/health':
-        return redirect(f"/health?chat_id={chat_id}")
-    else:
-        return "Неизвестная команда. Используйте /help для списка доступных команд."
+    response_text = process_command(chat_id, text)
+    
+    return jsonify({
+        "method": "sendMessage",
+        "chat_id": chat_id,
+        "text": response_text
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000, debug=True)
