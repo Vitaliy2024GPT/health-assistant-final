@@ -33,14 +33,19 @@ app.config['SESSION_KEY_PREFIX'] = 'health_assistant_'
 app.config['SESSION_REDIS'] = redis_client if redis_client else None
 Session(app)
 
-# Явный путь к client_secret.json
-CLIENT_SECRET_PATH = os.path.join(os.path.dirname(__file__), 'client_secret.json')
-if not os.path.exists(CLIENT_SECRET_PATH):
-    raise FileNotFoundError(f"client_secret.json not found at {CLIENT_SECRET_PATH}")
+# Чтение учетных данных Google из переменной окружения
+google_credentials = os.getenv('GOOGLE_CLIENT_SECRET_JSON')
+if not google_credentials:
+    raise ValueError("GOOGLE_CLIENT_SECRET_JSON environment variable is not set")
+
+try:
+    credentials_info = json.loads(google_credentials)
+except json.JSONDecodeError:
+    raise ValueError("Failed to parse GOOGLE_CLIENT_SECRET_JSON. Ensure it's a valid JSON string.")
 
 # Инициализация Google OAuth2 Flow
-flow = Flow.from_client_secrets_file(
-    CLIENT_SECRET_PATH,
+flow = Flow.from_client_config(
+    credentials_info,
     scopes=[
         'https://www.googleapis.com/auth/userinfo.email',
         'https://www.googleapis.com/auth/userinfo.profile',
@@ -72,12 +77,13 @@ def google_auth():
 @app.route('/googleauth/callback')
 def google_auth_callback():
     logger.info("Handling Google OAuth callback")
-    session_state = session.pop('state', None)  # Очищаем state после извлечения
+    session_state = session.get('state')
     response_state = request.args.get('state')
     logger.info(f"Session state: {session_state}, Response state: {response_state}")
 
     if not session_state or session_state != response_state:
         logger.error("State mismatch error during OAuth callback")
+        session.pop('state', None)
         return "State mismatch error. Please try again.", 400
 
     try:
