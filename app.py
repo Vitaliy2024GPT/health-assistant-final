@@ -161,5 +161,20 @@ def show_profile(chat_id):
 def show_health_data(chat_id):
     send_telegram_message(chat_id, "📊 Ваши данные о здоровье: [здесь будет информация о здоровье].")
 
+def logout_user(chat_id):
+    session.clear()
+    send_telegram_message(chat_id, "Вы успешно вышли из системы. До встречи! 👋")
+
+def show_help(chat_id):
+    help_text = """
+    🛠 Доступные команды:
+    /start - Начать взаимодействие
+    /profile - Показать профиль
+    /health - Показать данные о здоровье
+    /logout - Выйти из системы
+    /help - Показать это сообщение
+    """
+    send_telegram_message(chat_id, help_text)
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000)))
