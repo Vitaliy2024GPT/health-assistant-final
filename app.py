@@ -173,4 +173,34 @@ def show_profile(chat_id):
         send_telegram_message(chat_id, f"👤 Профиль:\nИмя: {user_info.get('name')}\nEmail: {user_info.get('email')}")
 
 if __name__ == '__main__':
+    def show_health_data(chat_id):
+    """
+    Отображает данные о здоровье пользователя из Google Fit.
+    """
+    credentials = session.get('credentials')
+    if not credentials:
+        auth_url = url_for('google_auth', _external=True)
+        send_telegram_message(chat_id, f"Пожалуйста, пройдите авторизацию через Google: {auth_url}")
+    else:
+        try:
+            user_info_service = build('fitness', 'v1', credentials=Credentials(**credentials))
+            health_data = user_info_service.users().dataset().aggregate(
+                userId='me',
+                body={
+                    "aggregateBy": [{"dataTypeName": "com.google.step_count.delta"}],
+                    "bucketByTime": {"durationMillis": 86400000},
+                    "startTimeMillis": 0,
+                    "endTimeMillis": 9999999999999
+                }
+            ).execute()
+
+            if health_data:
+                send_telegram_message(chat_id, f"📊 Данные о здоровье:\n{health_data}")
+            else:
+                send_telegram_message(chat_id, "❌ Не удалось получить данные о здоровье.")
+
+        except Exception as e:
+            logger.error(f"Failed to fetch health data: {e}")
+            send_telegram_message(chat_id, "❌ Произошла ошибка при получении данных о здоровье.")
+
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000)))
