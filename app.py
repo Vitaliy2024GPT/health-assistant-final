@@ -5,13 +5,19 @@ from googleapiclient.discovery import build
 import redis
 import os
 import json
+import time
 from io import StringIO
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your_secret_key')
 
 # Redis client for session management
-redis_client = redis.StrictRedis.from_url(os.environ.get('REDIS_URL'))
+redis_client = redis.StrictRedis(
+    host=os.environ.get('REDIS_HOST', 'localhost'),
+    port=int(os.environ.get('REDIS_PORT', 6379)),
+    db=0,
+    decode_responses=True
+)
 
 # Google OAuth configuration
 SCOPES = [
@@ -60,23 +66,6 @@ def profile():
         app.logger.error(f"Redis error: {e}")
         return "Ошибка сервера. Попробуйте позже.", 500
 
-# Страница данных о здоровье
-@app.route('/health')
-def health():
-    chat_id = request.args.get('chat_id')
-    if not chat_id:
-        return "Не указан chat_id. Попробуйте снова.", 400
-    
-    try:
-        health_data = redis_client.get(f'user:{chat_id}:health')
-        if health_data:
-            return f"📊 Данные о здоровье:\n{health_data}"
-        else:
-            return "Данные о здоровье отсутствуют. Пройдите синхронизацию с Google Fit."
-    except redis.RedisError as e:
-        app.logger.error(f"Redis error: {e}")
-        return "Ошибка сервера. Попробуйте позже.", 500
-
 # Аутентификация Google OAuth
 @app.route('/google_auth')
 def google_auth():
@@ -103,16 +92,52 @@ def google_auth_callback():
         flow.fetch_token(authorization_response=request.url)
         credentials = flow.credentials
         user_info = build('oauth2', 'v2', credentials=credentials).userinfo().get().execute()
+        
         chat_id = request.args.get('chat_id', 'unknown')
         redis_client.setex(f'user:{chat_id}:email', 3600, user_info.get('email', 'неизвестно'))
         redis_client.setex(f'user:{chat_id}:name', 3600, user_info.get('name', 'неизвестно'))
+        
+        # Получение данных Google Fit
+        fitness_service = build('fitness', 'v1', credentials=credentials)
+        dataset = fitness_service.users().dataset().aggregate(
+            userId='me',
+            body={
+                "aggregateBy": [{"dataTypeName": "com.google.weight"}, {"dataTypeName": "com.google.height"}],
+                "bucketByTime": {"durationMillis": 86400000},
+                "startTimeMillis": int((time.time() - 86400) * 1000),
+                "endTimeMillis": int(time.time() * 1000)
+            }
+        ).execute()
+        
+        # Сохраняем данные в Redis
+        health_data = json.dumps(dataset)
+        redis_client.setex(f'user:{chat_id}:health', 3600, health_data)
+        
     except Exception as e:
         app.logger.error(f"OAuth callback failed: {str(e)}")
         return "Ошибка авторизации. Попробуйте снова.", 500
     finally:
         redis_client.delete(state)
     
-    return redirect('https://t.me/<ваш_бот>?start=profile')
+    return redirect(f'https://health-assistant-final.onrender.com/health?chat_id={chat_id}')
+
+# Страница здоровья пользователя
+@app.route('/health')
+def health():
+    chat_id = request.args.get('chat_id')
+    if not chat_id:
+        return "Не указан chat_id. Попробуйте снова.", 400
+    
+    try:
+        health_data = redis_client.get(f'user:{chat_id}:health')
+        if health_data:
+            parsed_data = json.loads(health_data)
+            return jsonify(parsed_data)
+        else:
+            return "Данные о здоровье отсутствуют. Пройдите синхронизацию с Google Fit."
+    except redis.RedisError as e:
+        app.logger.error(f"Redis error: {e}")
+        return "Ошибка сервера. Попробуйте позже.", 500
 
 # Выход из системы
 @app.route('/logout')
