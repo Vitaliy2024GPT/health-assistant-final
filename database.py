@@ -154,16 +154,13 @@ def get_calories_last_7_days(user_id):
     row = cursor.fetchone()
     return row["total_calories"] if row and row["total_calories"] is not None else 0
 
-# Инициализация базы данных и создание таблиц
+# Инициализация базы данных и создание таблиц, добавление тестового пользователя
 with app.app_context():
     init_db()
-
-# Добавление тестового пользователя
-def add_test_user():
-    db = sqlite3.connect(DATABASE)
-    cursor = db.cursor()
-    cursor.execute("INSERT INTO users (chat_id, name, email) VALUES (192695390, 'Test User', 'test@example.com')")
-    db.commit()
-    db.close()
-
-add_test_user()
+    def add_test_user():
+        db = sqlite3.connect(DATABASE)
+        cursor = db.cursor()
+        cursor.execute("INSERT INTO users (chat_id, name, email) VALUES (192695390, 'Test User', 'test@example.com')")
+        db.commit()
+        db.close()
+    add_test_user()
