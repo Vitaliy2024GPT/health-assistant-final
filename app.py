@@ -11,12 +11,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your_secret_key')
 
 # Redis client for session management
-redis_client = redis.StrictRedis(
-    host=os.environ.get('REDIS_HOST', 'localhost'),
-    port=int(os.environ.get('REDIS_PORT', 6379)),
-    db=0,
-    decode_responses=True
-)
+redis_client = redis.StrictRedis.from_url(os.environ.get('REDIS_URL'))
 
 # Google OAuth configuration
 SCOPES = [
