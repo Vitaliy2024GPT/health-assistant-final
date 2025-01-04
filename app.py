@@ -7,6 +7,7 @@ import os
 import json
 from urllib.parse import urlparse
 from io import StringIO
+import sqlite3
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your_secret_key')
@@ -84,16 +85,36 @@ def profile():
     chat_id = request.args.get('chat_id')
     if not chat_id:
         return jsonify({"error": "Missing chat ID"}), 400
-    # Добавьте логику для получения и отображения профиля пользователя по chat_id
-    return f"Страница профиля для chat ID: {chat_id}"
+    
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT name, email FROM users WHERE chat_id = ?', (chat_id,))
+    user = cursor.fetchone()
+    conn.close()
+    
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    
+    name, email = user
+    return f"Профиль пользователя: {name}, Email: {email}"
 
 @app.route('/health')
 def health():
     chat_id = request.args.get('chat_id')
     if not chat_id:
         return jsonify({"error": "Missing chat ID"}), 400
-    # Добавьте логику для получения и отображения данных о здоровье по chat_id
-    return f"Страница данных о здоровье для chat ID: {chat_id}"
+    
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT steps, calories, sleep FROM health_data WHERE chat_id = ?', (chat_id,))
+    health_data = cursor.fetchone()
+    conn.close()
+    
+    if not health_data:
+        return jsonify({"error": "Health data not found"}), 404
+    
+    steps, calories, sleep = health_data
+    return f"Данные о здоровье: Шаги: {steps}, Калории: {calories}, Сон: {sleep} часов"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000, debug=True)
