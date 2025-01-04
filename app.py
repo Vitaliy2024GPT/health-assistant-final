@@ -60,6 +60,23 @@ def profile():
         app.logger.error(f"Redis error: {e}")
         return "Ошибка сервера. Попробуйте позже.", 500
 
+# Страница данных о здоровье
+@app.route('/health')
+def health():
+    chat_id = request.args.get('chat_id')
+    if not chat_id:
+        return "Не указан chat_id. Попробуйте снова.", 400
+    
+    try:
+        health_data = redis_client.get(f'user:{chat_id}:health')
+        if health_data:
+            return f"📊 Данные о здоровье:\n{health_data}"
+        else:
+            return "Данные о здоровье отсутствуют. Пройдите синхронизацию с Google Fit."
+    except redis.RedisError as e:
+        app.logger.error(f"Redis error: {e}")
+        return "Ошибка сервера. Попробуйте позже.", 500
+
 # Аутентификация Google OAuth
 @app.route('/google_auth')
 def google_auth():
@@ -125,6 +142,8 @@ def telegram_webhook():
         response_text = "Добро пожаловать в Health Assistant 360! 🚀"
     elif text == '/profile':
         response_text = f"Переход к вашему профилю: https://health-assistant-final.onrender.com/profile?chat_id={chat_id}"
+    elif text == '/health':
+        response_text = f"Переход к вашим данным о здоровье: https://health-assistant-final.onrender.com/health?chat_id={chat_id}"
     elif text == '/help':
         response_text = '''🛠 Доступные команды:
 - /start - Начать взаимодействие
