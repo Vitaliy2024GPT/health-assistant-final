@@ -5,7 +5,6 @@ from googleapiclient.discovery import build
 import redis
 import os
 import json
-import time
 from urllib.parse import urlparse
 from io import StringIO
 
@@ -34,7 +33,6 @@ SCOPES = [
 ]
 REDIRECT_URI = 'https://health-assistant-final.onrender.com/googleauth/callback'
 
-# Использование данных из переменной окружения GOOGLE_CLIENT_SECRET_JSON
 def get_flow():
     google_credentials_json = os.environ.get('GOOGLE_CLIENT_SECRET_JSON')
     if not google_credentials_json:
@@ -47,75 +45,39 @@ def get_flow():
         redirect_uri=REDIRECT_URI
     )
 
-# Главная страница
 @app.route('/')
 def home():
     return "Добро пожаловать в Health Assistant 360! 🚀"
 
-# Страница профиля пользователя
-@app.route('/profile')
-def profile():
-    chat_id = request.args.get('chat_id')
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    data = request.get_json()
+    if not data:
+        app.logger.error("Empty or invalid webhook payload.")
+        return jsonify({"error": "Invalid payload"}), 400
+    
+    message = data.get('message', {})
+    text = message.get('text', '')
+    chat_id = message.get('chat', {}).get('id')
+    
     if not chat_id:
-        return "Не указан chat_id. Попробуйте снова.", 400
+        app.logger.error("Chat ID not found in webhook payload.")
+        return jsonify({"error": "Missing chat ID"}), 400
     
-    try:
-        user_email = redis_client.get(f'user:{chat_id}:email')
-        user_name = redis_client.get(f'user:{chat_id}:name')
-        
-        if user_email and user_name:
-            return f"👤 Профиль пользователя:\nИмя: {user_name}\nEmail: {user_email}"
-        else:
-            return redirect('/google_auth')
-    except redis.RedisError as e:
-        app.logger.error(f"Redis error: {e}")
-        return "Ошибка сервера. Попробуйте позже.", 500
-
-# Аутентификация Google OAuth
-@app.route('/google_auth')
-def google_auth():
-    state = os.urandom(24).hex()
-    session['state'] = state
-    try:
-        redis_client.setex(state, 300, 'active')
-    except redis.RedisError as e:
-        app.logger.error(f"Redis error: {e}")
-        return "Ошибка сервера. Попробуйте позже.", 500
+    if text == '/start':
+        response_text = "Добро пожаловать в Health Assistant 360! 🚀"
+    elif text == '/profile':
+        response_text = f"Переход к вашему профилю: https://health-assistant-final.onrender.com/profile?chat_id={chat_id}"
+    elif text == '/health':
+        response_text = f"Переход к вашим данным о здоровье: https://health-assistant-final.onrender.com/health?chat_id={chat_id}"
+    else:
+        response_text = "Неизвестная команда. Используйте /help для списка доступных команд."
     
-    auth_url, _ = get_flow().authorization_url(state=state, access_type='offline', prompt='consent')
-    return redirect(auth_url)
-
-# Callback для Google OAuth
-@app.route('/googleauth/callback', methods=['GET'])
-def google_auth_callback():
-    state = request.args.get('state')
-    if not state or not redis_client.get(state):
-        return "Ошибка проверки состояния. Попробуйте снова.", 400
-    
-    try:
-        flow = get_flow()
-        flow.fetch_token(authorization_response=request.url)
-        credentials = flow.credentials
-        user_info = build('oauth2', 'v2', credentials=credentials).userinfo().get().execute()
-        chat_id = request.args.get('chat_id', 'unknown')
-        redis_client.setex(f'user:{chat_id}:email', 3600, user_info.get('email', 'неизвестно'))
-        redis_client.setex(f'user:{chat_id}:name', 3600, user_info.get('name', 'неизвестно'))
-    except Exception as e:
-        app.logger.error(f"OAuth callback failed: {str(e)}")
-        return "Ошибка авторизации. Попробуйте снова.", 500
-    finally:
-        redis_client.delete(state)
-    
-    return redirect(f'https://health-assistant-final.onrender.com/health?chat_id={chat_id}')
-
-# Тест Redis
-@app.route('/redis_test')
-def redis_test():
-    try:
-        redis_client.ping()
-        return "✅ Подключение к Redis успешно установлено!"
-    except redis.RedisError as e:
-        return f"❌ Ошибка подключения к Redis: {e}"
+    return jsonify({
+        "method": "sendMessage",
+        "chat_id": chat_id,
+        "text": response_text
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000, debug=True)
