@@ -1,7 +1,10 @@
 import sqlite3
-from flask import g
+from flask import Flask, g
 import os
 from datetime import date, timedelta
+
+# Создание приложения Flask
+app = Flask(__name__)
 
 # Указываем директорию для базы данных
 DATABASE_DIR = os.getenv("DATABASE_DIR", "/tmp")
@@ -152,7 +155,8 @@ def get_calories_last_7_days(user_id):
     return row["total_calories"] if row and row["total_calories"] is not None else 0
 
 # Инициализация базы данных и создание таблиц
-init_db()
+with app.app_context():
+    init_db()
 
 # Добавление тестового пользователя
 def add_test_user():
