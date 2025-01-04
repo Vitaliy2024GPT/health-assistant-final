@@ -110,7 +110,7 @@ def logout():
     redis_client.delete(f'user:{chat_id}:name')
     return "Вы успешно вышли из системы!"
 
-# Webhook для Telegram
+# Обработка команд Telegram-бота
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     data = request.get_json()
@@ -126,7 +126,19 @@ def telegram_webhook():
         app.logger.error("Chat ID not found in webhook payload.")
         return jsonify({"error": "Missing chat ID"}), 400
     
-    response_text = f"Вы ввели команду: {text}"
+    if text == '/start':
+        response_text = "Добро пожаловать в Health Assistant 360! 🚀"
+    elif text == '/profile':
+        response_text = f"Переход к вашему профилю: https://health-assistant-final.onrender.com/profile?chat_id={chat_id}"
+    elif text == '/help':
+        response_text = '''🛠 Доступные команды:
+- /start - Начать взаимодействие
+- /profile - Показать профиль
+- /health - Показать данные о здоровье
+- /logout - Выйти из системы
+- /help - Показать это сообщение'''
+    else:
+        response_text = "Неизвестная команда. Используйте /help для списка доступных команд."
     
     return jsonify({
         "method": "sendMessage",
