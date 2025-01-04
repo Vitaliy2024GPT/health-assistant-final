@@ -79,5 +79,21 @@ def telegram_webhook():
         "text": response_text
     })
 
+@app.route('/profile')
+def profile():
+    chat_id = request.args.get('chat_id')
+    if not chat_id:
+        return jsonify({"error": "Missing chat ID"}), 400
+    # Добавьте логику для получения и отображения профиля пользователя по chat_id
+    return f"Страница профиля для chat ID: {chat_id}"
+
+@app.route('/health')
+def health():
+    chat_id = request.args.get('chat_id')
+    if not chat_id:
+        return jsonify({"error": "Missing chat ID"}), 400
+    # Добавьте логику для получения и отображения данных о здоровье по chat_id
+    return f"Страница данных о здоровье для chat ID: {chat_id}"
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000, debug=True)
