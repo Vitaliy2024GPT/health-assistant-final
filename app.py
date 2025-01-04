@@ -41,7 +41,31 @@ def get_flow():
         redirect_uri=REDIRECT_URI
     )
 
-# Маршруты API
+# Главная страница
+@app.route('/')
+def home():
+    return "Добро пожаловать в Health Assistant 360! 🚀"
+
+# Страница профиля пользователя
+@app.route('/profile')
+def profile():
+    chat_id = request.args.get('chat_id')
+    if not chat_id:
+        return "Не указан chat_id. Попробуйте снова.", 400
+    
+    try:
+        user_email = redis_client.get(f'user:{chat_id}:email')
+        user_name = redis_client.get(f'user:{chat_id}:name')
+        
+        if user_email and user_name:
+            return f"👤 Профиль пользователя:\nИмя: {user_name}\nEmail: {user_email}"
+        else:
+            return redirect('/google_auth')
+    except redis.RedisError as e:
+        app.logger.error(f"Redis error: {e}")
+        return "Ошибка сервера. Попробуйте позже.", 500
+
+# Аутентификация Google OAuth
 @app.route('/google_auth')
 def google_auth():
     state = os.urandom(24).hex()
@@ -55,6 +79,7 @@ def google_auth():
     auth_url, _ = get_flow().authorization_url(state=state, access_type='offline', prompt='consent')
     return redirect(auth_url)
 
+# Callback для Google OAuth
 @app.route('/googleauth/callback', methods=['GET'])
 def google_auth_callback():
     state = request.args.get('state')
@@ -76,6 +101,38 @@ def google_auth_callback():
         redis_client.delete(state)
     
     return redirect('https://t.me/<ваш_бот>?start=profile')
+
+# Выход из системы
+@app.route('/logout')
+def logout():
+    chat_id = request.args.get('chat_id', 'unknown')
+    redis_client.delete(f'user:{chat_id}:email')
+    redis_client.delete(f'user:{chat_id}:name')
+    return "Вы успешно вышли из системы!"
+
+# Webhook для Telegram
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    data = request.get_json()
+    if not data:
+        app.logger.error("Empty or invalid webhook payload.")
+        return jsonify({"error": "Invalid payload"}), 400
+    
+    message = data.get('message', {})
+    text = message.get('text', '')
+    chat_id = message.get('chat', {}).get('id')
+    
+    if not chat_id:
+        app.logger.error("Chat ID not found in webhook payload.")
+        return jsonify({"error": "Missing chat ID"}), 400
+    
+    response_text = f"Вы ввели команду: {text}"
+    
+    return jsonify({
+        "method": "sendMessage",
+        "chat_id": chat_id,
+        "text": response_text
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000, debug=True)
