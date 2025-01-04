@@ -160,7 +160,7 @@ with app.app_context():
     def add_test_user():
         db = sqlite3.connect(DATABASE)
         cursor = db.cursor()
-        cursor.execute("INSERT INTO users (chat_id, name, email) VALUES (192695390, 'Test User', 'test@example.com')")
+        cursor.execute("INSERT INTO users (chat_id, name) VALUES (192695390, 'Test User')")
         db.commit()
         db.close()
     add_test_user()
