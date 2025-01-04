@@ -8,13 +8,18 @@ import os
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your_secret_key')
 
-# Redis client for session management
-redis_client = redis.StrictRedis(
-    host=os.environ.get('REDIS_HOST', 'localhost'),
-    port=6379,
-    db=0,
-    decode_responses=True
-)
+# Redis client for session management with improved error handling
+try:
+    redis_client = redis.StrictRedis(
+        host=os.environ.get('REDIS_HOST', 'localhost'),
+        port=int(os.environ.get('REDIS_PORT', 6379)),
+        db=0,
+        decode_responses=True
+    )
+    redis_client.ping()
+except redis.ConnectionError as e:
+    app.logger.error(f"Ошибка подключения к Redis: {e}")
+    redis_client = None
 
 # Google OAuth configuration
 CLIENT_SECRETS_FILE = "client_secret.json"
@@ -60,12 +65,16 @@ def start():
 @app.route('/profile')
 def profile():
     chat_id = request.args.get('chat_id')
-    user_email = redis_client.get(f'user:{chat_id}:email')
-    user_name = redis_client.get(f'user:{chat_id}:name')
-    if user_email and user_name:
-        return f"👤 Профиль пользователя:\nИмя: {user_name}\nEmail: {user_email}"
-    else:
-        return redirect('/google_auth')
+    if redis_client:
+        try:
+            user_email = redis_client.get(f'user:{chat_id}:email')
+            user_name = redis_client.get(f'user:{chat_id}:name')
+            if user_email and user_name:
+                return f"👤 Профиль пользователя:\nИмя: {user_name}\nEmail: {user_email}"
+        except redis.ConnectionError as e:
+            app.logger.error(f"Ошибка при получении данных из Redis: {e}")
+            return "Ошибка при получении данных. Попробуйте позже.", 500
+    return redirect('/google_auth')
 
 @app.route('/health')
 def health():
@@ -84,11 +93,12 @@ def help():
 def google_auth():
     state = os.urandom(24).hex()
     session['state'] = state
-    try:
-        redis_client.setex(state, 300, 'active')
-    except redis.RedisError as e:
-        app.logger.error(f"Redis error: {e}")
-        return "Ошибка сервера. Попробуйте позже.", 500
+    if redis_client:
+        try:
+            redis_client.setex(state, 300, 'active')
+        except redis.RedisError as e:
+            app.logger.error(f"Ошибка Redis при установке state: {e}")
+            return "Ошибка сервера. Попробуйте позже.", 500
     
     auth_url, _ = get_flow().authorization_url(state=state, access_type='offline', prompt='consent')
     return redirect(auth_url)
@@ -96,7 +106,7 @@ def google_auth():
 @app.route('/googleauth/callback', methods=['GET'])
 def google_auth_callback():
     state = request.args.get('state')
-    if not state or not redis_client.get(state):
+    if not state or (redis_client and not redis_client.get(state)):
         return "Ошибка проверки состояния. Попробуйте снова.", 400
     
     try:
@@ -105,21 +115,24 @@ def google_auth_callback():
         credentials = flow.credentials
         user_info = build('oauth2', 'v2', credentials=credentials).userinfo().get().execute()
         chat_id = request.args.get('chat_id', 'unknown')
-        redis_client.setex(f'user:{chat_id}:email', 3600, user_info.get('email', 'неизвестно'))
-        redis_client.setex(f'user:{chat_id}:name', 3600, user_info.get('name', 'неизвестно'))
+        if redis_client:
+            redis_client.setex(f'user:{chat_id}:email', 3600, user_info.get('email', 'неизвестно'))
+            redis_client.setex(f'user:{chat_id}:name', 3600, user_info.get('name', 'неизвестно'))
     except Exception as e:
         app.logger.error(f"OAuth callback failed: {str(e)}")
         return "Ошибка авторизации. Попробуйте снова.", 500
     finally:
-        redis_client.delete(state)
+        if redis_client:
+            redis_client.delete(state)
     
     return redirect('https://t.me/<ваш_бот>?start=profile')
 
 @app.route('/logout')
 def logout():
     chat_id = request.args.get('chat_id', 'unknown')
-    redis_client.delete(f'user:{chat_id}:email')
-    redis_client.delete(f'user:{chat_id}:name')
+    if redis_client:
+        redis_client.delete(f'user:{chat_id}:email')
+        redis_client.delete(f'user:{chat_id}:name')
     return "Вы успешно вышли из системы!"
 
 # Маршрут для Telegram webhook
