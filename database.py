@@ -159,4 +159,5 @@ def add_test_user():
     db.commit()
     db.close()
 
+init_db()
 add_test_user()
