@@ -22,7 +22,6 @@ bot_token = os.environ.get('TELEGRAM_TOKEN')
 bot = Bot(bot_token)
 application = ApplicationBuilder().token(bot_token).defaults(Defaults(parse_mode="HTML", allow_sending_without_reply=True)).build()
 
-
 class User(db.Model):  # Пример модели
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -31,8 +30,7 @@ class User(db.Model):  # Пример модели
 
 # ... другие ваши модели ...
 
-with app.app_context():  # Создаем контекст приложения Flask
-    db.create_all()      # Создаем таблицы в базе данных
+db.create_all()      # Создаем таблицы в базе данных
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
