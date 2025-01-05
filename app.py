@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, render_template
 from flask_sqlalchemy import SQLAlchemy
 import os
 
@@ -15,3 +15,10 @@ class User(db.Model):  # Пример модели
 
 with app.app_context():  # Создаем контекст приложения Flask
     db.create_all()      # Создаем таблицы в базе данных
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+if __name__ == '__main__':
+    app.run(debug=True)
