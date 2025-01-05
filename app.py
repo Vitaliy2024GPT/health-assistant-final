@@ -1,24 +1,58 @@
-from flask import Flask, render_template
+from flask import Flask, request, render_template
 from flask_sqlalchemy import SQLAlchemy
 import os
+import logging
+from telegram import Bot, Update
+from telegram.ext import Dispatcher, CallbackContext, CommandHandler
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or 'sqlite:///site.db'  # Получаем URL из переменных окружения или используем SQLite по умолчанию
 db = SQLAlchemy(app)
 
+# Настройка логирования
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Получаем токен бота из переменных окружения
+bot_token = os.environ.get('TELEGRAM_TOKEN')
+
+# Инициализируем бота и диспетчера
+bot = Bot(bot_token)
+dispatcher = Dispatcher(bot, None, workers=0)
+
 class User(db.Model):  # Пример модели
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
+    telegram_id = db.Column(db.Integer, unique=True, nullable=True)
 
 # ... другие ваши модели ...
 
 with app.app_context():  # Создаем контекст приложения Flask
     db.create_all()      # Создаем таблицы в базе данных
 
+
+def start(update: Update, context: CallbackContext):
+    """Обработчик команды /start"""
+    update.message.reply_text('Привет! Я медицинский ассистент.')
+
+dispatcher.add_handler(CommandHandler("start", start))
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
+
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    """Обработчик для приема обновлений от Telegram"""
+    try:
+        update = Update.de_json(request.get_json(force=True), bot)
+        dispatcher.process_update(update)
+    except Exception as e:
+        logger.error(f"Ошибка при обработке вебхука: {e}")
+    return 'ok', 200
+
 if __name__ == '__main__':
-    app.run(debug=True)
+   app.run(debug=True)
