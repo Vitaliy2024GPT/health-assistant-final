@@ -8,11 +8,11 @@ def start(update: Update, context: CallbackContext):
 
 def main():
     """Запускает бота."""
-    # Получаем токен бота из переменной окружения (необходимо создать переменную BOT_TOKEN)
-    bot_token = os.environ.get('BOT_TOKEN')
+    # Получаем токен бота из переменной окружения (необходимо создать переменную TELEGRAM_TOKEN)
+    bot_token = os.environ.get('TELEGRAM_TOKEN')
 
     if not bot_token:
-        print("Ошибка: Не установлен BOT_TOKEN в переменных окружения.")
+        print("Ошибка: Не установлен TELEGRAM_TOKEN в переменных окружения.")
         return
 
     updater = Updater(bot_token)
