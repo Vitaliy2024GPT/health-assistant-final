@@ -23,13 +23,6 @@ bot_token = os.environ.get('TELEGRAM_TOKEN')
 bot = Bot(bot_token)
 application = ApplicationBuilder().token(bot_token).defaults(Defaults(parse_mode="HTML", allow_sending_without_reply=True)).build()
 
-async def initialize_bot():
-    await application.initialize()
-    application.add_handler(CommandHandler("start", start))
-    application.add_error_handler(error_handler)
-
-asyncio.run(initialize_bot())
-
 class User(db.Model):  # Пример модели
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -54,6 +47,12 @@ async def error_handler(update: Update, context: CallbackContext) -> None:
     except Exception as e:
        logger.error(f"Exception in error handler {e}")
 
+async def initialize_bot():
+    await application.initialize()
+    application.add_handler(CommandHandler("start", start))
+    application.add_error_handler(error_handler)
+
+asyncio.run(initialize_bot())
 
 
 @app.route('/')
