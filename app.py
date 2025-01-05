@@ -20,6 +20,8 @@ bot_token = os.environ.get('TELEGRAM_TOKEN')
 # Инициализируем бота и диспетчера
 bot = Bot(bot_token)
 application = ApplicationBuilder().token(bot_token).build()
+asyncio.run(application.initialize())
+
 
 class User(db.Model):  # Пример модели
     id = db.Column(db.Integer, primary_key=True)
