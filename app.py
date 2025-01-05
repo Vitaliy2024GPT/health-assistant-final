@@ -19,7 +19,17 @@ logger = logging.getLogger(__name__)
 # Получаем токен бота из переменных окружения
 bot_token = os.environ.get('TELEGRAM_TOKEN')
 
+# Инициализируем бота и диспетчера
+bot = Bot(bot_token)
+application = ApplicationBuilder().token(bot_token).defaults(Defaults(parse_mode="HTML", allow_sending_without_reply=True)).build()
 
+async def initialize_bot():
+    await application.initialize()
+    application.add_handler(CommandHandler("start", start))
+    application.add_error_handler(error_handler)
+
+
+asyncio.run(initialize_bot())
 
 class User(db.Model):  # Пример модели
     id = db.Column(db.Integer, primary_key=True)
@@ -54,18 +64,8 @@ def index():
 def telegram_webhook():
     """Обработчик для приема обновлений от Telegram"""
     try:
-        bot = Bot(bot_token)
-        application = ApplicationBuilder().token(bot_token).defaults(Defaults(parse_mode="HTML", allow_sending_without_reply=True)).build()
-        
-        async def process_update(update:Update):
-            await application.initialize()
-            application.add_handler(CommandHandler("start", start))
-            application.add_error_handler(error_handler)
-            await application.process_update(update)
-
-
         update = Update.de_json(request.get_json(force=True), bot)
-        asyncio.run(process_update(update))
+        asyncio.create_task(application.process_update(update))
     except Exception as e:
         logger.error(f"Ошибка при обработке вебхука: {e}")
     return 'ok', 200
