@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 import os
 import logging
 from telegram import Bot, Update
-from telegram.ext import Dispatcher, CallbackContext, CommandHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or 'sqlite:///site.db'  # Получаем URL из переменных окружения или используем SQLite по умолчанию
@@ -18,7 +18,7 @@ bot_token = os.environ.get('TELEGRAM_TOKEN')
 
 # Инициализируем бота и диспетчера
 bot = Bot(bot_token)
-dispatcher = Dispatcher(bot, None, workers=0)
+application = ApplicationBuilder().token(bot_token).build()
 
 class User(db.Model):  # Пример модели
     id = db.Column(db.Integer, primary_key=True)
@@ -32,11 +32,11 @@ with app.app_context():  # Создаем контекст приложения 
     db.create_all()      # Создаем таблицы в базе данных
 
 
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
-    update.message.reply_text('Привет! Я медицинский ассистент.')
+    await update.message.reply_text('Привет! Я медицинский ассистент.')
 
-dispatcher.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("start", start))
 
 
 @app.route('/')
@@ -49,7 +49,7 @@ def telegram_webhook():
     """Обработчик для приема обновлений от Telegram"""
     try:
         update = Update.de_json(request.get_json(force=True), bot)
-        dispatcher.process_update(update)
+        application.process_update(update)
     except Exception as e:
         logger.error(f"Ошибка при обработке вебхука: {e}")
     return 'ok', 200
