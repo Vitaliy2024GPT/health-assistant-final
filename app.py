@@ -7,6 +7,7 @@ from telegram import Bot, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes,  Defaults, CallbackContext
 from telegram.error import TelegramError
 
+
 app = Quart(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or 'sqlite:///site.db'  # Получаем URL из переменных окружения или используем SQLite по умолчанию
 db = SQLAlchemy(app)
@@ -31,8 +32,7 @@ class User(db.Model):  # Пример модели
 
 # ... другие ваши модели ...
 
-with app.app_context():  # Создаем контекст приложения Flask
-    db.create_all()      # Создаем таблицы в базе данных
+
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,6 +62,8 @@ async def index():
 async def telegram_webhook():
     """Обработчик для приема обновлений от Telegram"""
     try:
+        async with app.app_context():
+             db.create_all()
         update = Update.de_json(await request.get_data(as_text=True), bot)
         await application.process_update(update)
     except Exception as e:
