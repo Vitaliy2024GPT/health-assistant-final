@@ -21,11 +21,14 @@ bot_token = os.environ.get('TELEGRAM_TOKEN')
 
 # Инициализируем бота и диспетчера
 bot = Bot(bot_token)
-async def init_bot():
-  await bot.initialize()
-
-asyncio.run(init_bot())
 application = ApplicationBuilder().token(bot_token).defaults(Defaults(parse_mode="HTML", allow_sending_without_reply=True)).build()
+
+async def initialize_bot():
+    await application.initialize()
+    application.add_handler(CommandHandler("start", start))
+    application.add_error_handler(error_handler)
+
+asyncio.run(initialize_bot())
 
 
 
@@ -45,7 +48,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     await update.message.reply_text('Привет! Я медицинский ассистент.')
 
-application.add_handler(CommandHandler("start", start))
+
 
 async def error_handler(update: Update, context: CallbackContext) -> None:
     """Log the error and send a telegram message to notify the developer."""
@@ -56,7 +59,8 @@ async def error_handler(update: Update, context: CallbackContext) -> None:
     except Exception as e:
        logger.error(f"Exception in error handler {e}")
 
-application.add_error_handler(error_handler)
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
