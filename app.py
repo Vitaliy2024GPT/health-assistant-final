@@ -2,6 +2,7 @@ from flask import Flask, request, render_template
 from flask_sqlalchemy import SQLAlchemy
 import os
 import logging
+import asyncio
 from telegram import Bot, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -43,13 +44,15 @@ application.add_handler(CommandHandler("start", start))
 def index():
     return render_template('index.html')
 
+async def process_update(update:Update):
+    await application.process_update(update)
 
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     """Обработчик для приема обновлений от Telegram"""
     try:
         update = Update.de_json(request.get_json(force=True), bot)
-        application.process_update(update)
+        asyncio.run(process_update(update))
     except Exception as e:
         logger.error(f"Ошибка при обработке вебхука: {e}")
     return 'ok', 200
