@@ -1,5 +1,4 @@
 from quart import Quart, request, render_template
-from flask_sqlalchemy import SQLAlchemy
 import os
 import logging
 import asyncio
@@ -9,8 +8,6 @@ from telegram.error import TelegramError
 
 
 app = Quart(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or 'sqlite:///site.db'  # Получаем URL из переменных окружения или используем SQLite по умолчанию
-db = SQLAlchemy(app)
 
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -22,17 +19,6 @@ bot_token = os.environ.get('TELEGRAM_TOKEN')
 # Инициализируем бота и диспетчера
 bot = Bot(bot_token)
 application = ApplicationBuilder().token(bot_token).defaults(Defaults(parse_mode="HTML", allow_sending_without_reply=True)).build()
-
-
-class User(db.Model):  # Пример модели
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    telegram_id = db.Column(db.Integer, unique=True, nullable=True)
-
-# ... другие ваши модели ...
-
-
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62,8 +48,6 @@ async def index():
 async def telegram_webhook():
     """Обработчик для приема обновлений от Telegram"""
     try:
-        async with app.app_context():
-             db.create_all()
         update = Update.de_json(await request.get_data(as_text=True), bot)
         await application.process_update(update)
     except Exception as e:
