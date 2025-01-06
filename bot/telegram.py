@@ -27,11 +27,10 @@ class TelegramBot:
             text=bot_commands["help"]
         )
 
-    def handle_update(self, data: json):
+    async def handle_update(self, data: json):
         try:
             update = Update.de_json(data, self.application.bot)
-            self.application.process_update(update)
+            await self.application.process_update(update)
             logging.info(f"Telegram update processed: {update}")
         except Exception as e:
             logging.error(f"Error on handle_update {e}")
-    
