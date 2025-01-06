@@ -1,71 +1,197 @@
-from quart import Quart, request, render_template
-from flask_sqlalchemy import SQLAlchemy
-import os
 import logging
-import asyncio
-from telegram import Bot, Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes,  Defaults, CallbackContext
-from telegram.error import TelegramError
+import os
+import json
+from urllib.parse import urlparse
+from datetime import timedelta
 
+from flask import Flask, request, session, redirect, url_for, render_template
+from flask_sqlalchemy import SQLAlchemy
+from flask_session import Session
 
-app = Quart(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or 'sqlite:///site.db'  # Получаем URL из переменных окружения или используем SQLite по умолчанию
-db = SQLAlchemy(app)
+import redis
+import google_auth_httplib2
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from google.oauth2 import credentials
+from google.auth.transport.requests import Request
+
+from bot import bot_commands
+from bot.telegram import TelegramBot
+from google_auth_oauthlib.flow import Flow
 
 # Настройка логирования
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Получаем токен бота из переменных окружения
-bot_token = os.environ.get('TELEGRAM_TOKEN')
+# Инициализация Flask
+app = Flask(__name__)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'supersecretkey')
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_PERMANENT'] = True
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_REDIS'] = redis.from_url(os.environ.get('REDIS_URL'))
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Инициализируем бота и диспетчера
-bot = Bot(bot_token)
-application = ApplicationBuilder().token(bot_token).defaults(Defaults(parse_mode="HTML", allow_sending_without_reply=True)).build()
+# Инициализация расширений Flask
+db = SQLAlchemy(app)
+server_session = Session(app)
 
-class User(db.Model):  # Пример модели
+
+# Модель пользователя
+class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    telegram_id = db.Column(db.Integer, unique=True, nullable=True)
+    google_id = db.Column(db.String(100), unique=True, nullable=False)
+    telegram_id = db.Column(db.String(100), unique=True, nullable=True)
 
-# ... другие ваши модели ...
 
-with app.app_context():  # Создаем контекст приложения Flask
-    db.create_all()      # Создаем таблицы в базе данных
+# Создание таблиц базы данных при первом запуске
+with app.app_context():
+    db.create_all()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
-    await update.message.reply_text('Привет! Я медицинский ассистент.')
 
-async def error_handler(update: Update, context: CallbackContext) -> None:
-    """Log the error and send a telegram message to notify the developer."""
-    # Log the error before we have a chance to try to access context.chat_data
-    logger.error(f"Exception while handling an update: {context.error}")
+# Функция для проверки наличия пользователя в БД
+def get_user_from_db(google_id):
+    user = User.query.filter_by(google_id=google_id).first()
+    if user:
+        logging.info(f"User found in database: {user.google_id}")
+        return user
+    else:
+        logging.info(f"User not found in database: {google_id}")
+        return None
+
+
+# Конфигурация Google OAuth
+def get_google_flow():
+    CLIENT_SECRET_JSON = json.loads(os.environ.get('GOOGLE_CLIENT_SECRET_JSON'))
+    flow = Flow.from_client_config(
+        CLIENT_SECRET_JSON,
+        scopes=[
+            'https://www.googleapis.com/auth/fitness.activity.read',
+            'https://www.googleapis.com/auth/fitness.body.read',
+            'https://www.googleapis.com/auth/fitness.location.read',
+            'openid', 'email', 'profile'
+        ],
+        redirect_uri=os.environ.get('GOOGLE_AUTH_REDIRECT')
+    )
+    return flow
+
+
+# Маршрут для авторизации Google
+@app.route('/googleauth', methods=['GET'])
+def googleauth():
+    flow = get_google_flow()
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+    )
+    session['state'] = state
+    logging.info(f"Redirecting user to Google for authorization: {authorization_url}")
+    return redirect(authorization_url)
+
+
+# Маршрут для колбека Google OAuth
+@app.route('/googleauth/callback')
+def googleauth_callback():
+    state = session['state']
+    flow = get_google_flow()
+    flow.fetch_token(authorization_response=request.url)
+    credentials = flow.credentials
+    logging.info(f"Google credentials received and stored in session")
+    session['credentials'] = credentials_to_dict(credentials)
+
+    # Получение данных пользователя
+    google_id = credentials.id_token['sub']
+    user = get_user_from_db(google_id)
+
+    if user:
+        session['user_id'] = user.id
+    else:
+        # Создание нового пользователя
+        new_user = User(google_id=google_id)
+        db.session.add(new_user)
+        db.session.commit()
+        session['user_id'] = new_user.id
+        logging.info(f"New user created with google_id: {google_id}")
+    return redirect(url_for('dashboard'))
+
+# Маршрут для дэшборда
+@app.route('/dashboard', methods=['GET'])
+def dashboard():
+    if 'user_id' not in session:
+        logging.info(f"User not authorized")
+        return redirect(url_for('googleauth'))
+
+    user_id = session['user_id']
+    logging.info(f"User with ID {user_id} is authorized and on the dashboard page")
+    return render_template('dashboard.html', user_id=user_id)
+
+
+# Маршрут для данных Google Fit
+@app.route('/get_data', methods=['GET'])
+def get_data():
+    if 'credentials' not in session:
+        return redirect(url_for('googleauth'))
+
+    creds = credentials_from_dict(session['credentials'])
+    logging.info(f"Fetching Google Fit data with credentials: {creds}")
+    fitness_service = build('fitness', 'v1', credentials=creds)
     try:
-      pass
+      datasets = fitness_service.users().dataSources().datasets().get(
+          userId='me',
+          dataSourceId='derived:com.google.step_count.delta:com.google.android.gms:estimated_steps',
+          datasetId='0-' + str(int((datetime.datetime.now() + timedelta(hours=3)).timestamp() * 1000000000))
+      ).execute()
+      logging.info(f"Successfully fetched datasets: {datasets}")
+      return datasets
+
     except Exception as e:
-       logger.error(f"Exception in error handler {e}")
+       logging.error(f"Error fetching Google Fit data: {e}")
+       return {"error": "Failed to fetch google fit data"}
 
-@app.before_serving
-async def initialize_bot():
-    application.add_handler(CommandHandler("start", start))
-    application.add_error_handler(error_handler)
-    await application.initialize()
+# Конвертация credentials
+def credentials_to_dict(credentials):
+    return {
+        'token': credentials.token,
+        'refresh_token': credentials.refresh_token,
+        'token_uri': credentials.token_uri,
+        'client_id': credentials.client_id,
+        'client_secret': credentials.client_secret,
+        'scopes': credentials.scopes
+    }
 
-@app.route('/')
-async def index():
-    return await render_template('index.html')
 
+# Конвертация dict в credentials
+def credentials_from_dict(data):
+    return credentials.Credentials(**data)
+
+
+# Telegram Bot
 @app.route('/telegram_webhook', methods=['POST'])
-async def telegram_webhook():
-    """Обработчик для приема обновлений от Telegram"""
+def telegram_webhook():
     try:
-        update = Update.de_json(await request.get_data(as_text=True), bot)
-        await application.process_update(update)
+        data = request.get_json()
+        if not data:
+            logging.warning("No data received from Telegram webhook.")
+            return {"status": "ok"}
+
+        telegram_bot = TelegramBot(os.environ.get('TELEGRAM_TOKEN'))
+        telegram_bot.handle_update(data)
+        logging.info("Telegram update processed successfully.")
+        return {"status": "ok"}
+
     except Exception as e:
-        logger.error(f"Ошибка при обработке вебхука: {e}")
-    return 'ok', 200
+        logging.error(f"Error processing Telegram webhook: {e}")
+        return {"status": "error", "message": str(e)}
+
 
 if __name__ == '__main__':
-   app.run(debug=True)
+    app_context = app.app_context()
+    app_context.push()
+    try:
+      db.create_all()
+    except Exception as e:
+      logging.error(f"Error on db.create_all: {e}")
+    finally:
+      app_context.pop()
+    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
