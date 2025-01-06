@@ -15,7 +15,7 @@ from googleapiclient.discovery import build
 from google.oauth2 import credentials
 from google.auth.transport.requests import Request
 
-from bot import bot_commands
+
 from bot.telegram import TelegramBot
 from google_auth_oauthlib.flow import Flow
 
