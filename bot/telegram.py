@@ -1,20 +1,20 @@
 import logging
 import json
+import os
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, CallbackContext
 from bot import bot_commands
-from flask import url_for
+from flask import Flask, request
+
+app = Flask(__name__)
 
 class TelegramBot:
     def __init__(self, token: str):
         self.token = token
-        self.application = ApplicationBuilder().token(token).build()
+        self.application = ApplicationBuilder().token(token).build()  # Инициализация автоматическая
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("connect", self.connect_command))
-
-    async def initialize_application(self):
-        await self.application.initialize()  # Асинхронная инициализация
 
     async def start_command(self, update: Update, context: CallbackContext):
         logging.info(f"Start command from user {update.effective_user.id}")
@@ -47,3 +47,17 @@ class TelegramBot:
             logging.info(f"Telegram update processed: {update.update_id}")
         except Exception as e:
             logging.error(f"Error on handle_update {e}")
+
+# Создание экземпляра бота
+telegram_bot = TelegramBot(os.environ.get('TELEGRAM_TOKEN'))
+
+# Обработчик вебхука
+@app.route('/telegram_webhook', methods=['POST'])
+async def telegram_webhook():
+    data = await request.json
+    await telegram_bot.handle_update(data)
+    return {"status": "ok"}
+
+# Запуск Flask-приложения
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
