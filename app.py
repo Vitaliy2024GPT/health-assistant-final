@@ -165,17 +165,19 @@ def credentials_to_dict(credentials):
 def credentials_from_dict(data):
     return credentials.Credentials(**data)
 
-
+telegram_bot = None
 # Telegram Bot
 @app.route('/telegram_webhook', methods=['POST'])
 async def telegram_webhook():
+    global telegram_bot
+    if telegram_bot is None:
+        telegram_bot = TelegramBot(os.environ.get('TELEGRAM_TOKEN'))
+
     try:
         data = request.get_json()
         if not data:
             logging.warning("No data received from Telegram webhook.")
             return {"status": "ok"}
-
-        telegram_bot = TelegramBot(os.environ.get('TELEGRAM_TOKEN'))
         await telegram_bot.handle_update(data)
         logging.info("Telegram update processed successfully.")
         return {"status": "ok"}
