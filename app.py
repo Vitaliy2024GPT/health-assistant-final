@@ -67,7 +67,8 @@ def get_google_flow():
     scopes =  [
             'https://www.googleapis.com/auth/fitness.activity.read',
             'https://www.googleapis.com/auth/fitness.body.read',
-            'https://www.googleapis.com/auth/fitness.location.read'
+            'https://www.googleapis.com/auth/fitness.location.read',
+            'openid', 'email', 'profile'
         ]
     flow = Flow.from_client_config(
         CLIENT_SECRET_JSON,
@@ -83,6 +84,7 @@ def googleauth():
     flow = get_google_flow()
     authorization_url, state = flow.authorization_url(
         access_type='offline',
+       
     )
     session['state'] = state
     logging.info(f"Redirecting user to Google for authorization: {authorization_url}")
