@@ -9,10 +9,12 @@ class TelegramBot:
     def __init__(self, token: str):
         self.token = token
         self.application = ApplicationBuilder().token(token).build()
-        self.application.initialize()  # Явный вызов initialize
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("connect", self.connect_command))
+
+    async def initialize_application(self):
+        await self.application.initialize()  # Асинхронная инициализация
 
     async def start_command(self, update: Update, context: CallbackContext):
         logging.info(f"Start command from user {update.effective_user.id}")
