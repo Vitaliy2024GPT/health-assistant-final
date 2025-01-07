@@ -8,7 +8,8 @@ from bot import bot_commands
 class TelegramBot:
     def __init__(self, token: str):
         self.token = token
-        self.application = Application(token=token)
+        self.application = Application()
+        self.application.bot.token = self.token
         
 
     async def start_command(self, update: Update, context: CallbackContext):
