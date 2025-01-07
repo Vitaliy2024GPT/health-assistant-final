@@ -4,11 +4,10 @@ from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, CallbackContext
 from bot import bot_commands
 
-
 class TelegramBot:
     def __init__(self, token: str):
         self.token = token
-
+    
     async def start_command(self, update: Update, context: CallbackContext):
         logging.info(f"Start command from user {update.effective_user.id}")
         await context.bot.send_message(
@@ -25,6 +24,7 @@ class TelegramBot:
 
     async def handle_update(self, data: json):
         try:
+           
             application = ApplicationBuilder().token(self.token).build()
             application.add_handler(CommandHandler("start", self.start_command))
             application.add_handler(CommandHandler("help", self.help_command))
