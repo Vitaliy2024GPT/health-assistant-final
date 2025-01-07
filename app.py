@@ -83,7 +83,6 @@ def googleauth():
     flow = get_google_flow()
     authorization_url, state = flow.authorization_url(
         access_type='offline',
-       
     )
     session['state'] = state
     logging.info(f"Redirecting user to Google for authorization: {authorization_url}")
@@ -93,27 +92,30 @@ def googleauth():
 # Маршрут для колбека Google OAuth
 @app.route('/googleauth/callback')
 def googleauth_callback():
-    state = session['state']
-    flow = get_google_flow()
-    flow.fetch_token(authorization_response=request.url)
-    credentials = flow.credentials
-    logging.info(f"Google credentials received and stored in session")
-    session['credentials'] = credentials_to_dict(credentials)
-
-    # Получение данных пользователя
-    google_id = credentials.id_token['sub']
-    user = get_user_from_db(google_id)
-
-    if user:
-        session['user_id'] = user.id
+    if 'state' in session:
+      state = session['state']
+      flow = get_google_flow()
+      flow.fetch_token(authorization_response=request.url)
+      credentials = flow.credentials
+      logging.info(f"Google credentials received and stored in session")
+      session['credentials'] = credentials_to_dict(credentials)
+  
+      # Получение данных пользователя
+      google_id = credentials.id_token['sub']
+      user = get_user_from_db(google_id)
+  
+      if user:
+          session['user_id'] = user.id
+      else:
+          # Создание нового пользователя
+          new_user = User(google_id=google_id)
+          db.session.add(new_user)
+          db.session.commit()
+          session['user_id'] = new_user.id
+          logging.info(f"New user created with google_id: {google_id}")
+      return redirect(url_for('dashboard'))
     else:
-        # Создание нового пользователя
-        new_user = User(google_id=google_id)
-        db.session.add(new_user)
-        db.session.commit()
-        session['user_id'] = new_user.id
-        logging.info(f"New user created with google_id: {google_id}")
-    return redirect(url_for('dashboard'))
+       return "State is missing"
 
 # Маршрут для дэшборда
 @app.route('/dashboard', methods=['GET'])
