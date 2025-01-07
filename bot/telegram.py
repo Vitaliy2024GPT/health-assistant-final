@@ -1,18 +1,17 @@
 import logging
 import json
 from telegram import Update
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, CallbackContext, Updater
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, CallbackContext
 from bot import bot_commands
 
 
 class TelegramBot:
     def __init__(self, token: str):
         self.token = token
-        self.updater = Updater(token)
-        self.application = ApplicationBuilder().updater(self.updater).token(token).build()
+        self.application = ApplicationBuilder().token(token).build()
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
-    
+
     async def start_command(self, update: Update, context: CallbackContext):
         logging.info(f"Start command from user {update.effective_user.id}")
         await context.bot.send_message(
