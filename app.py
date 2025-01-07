@@ -85,7 +85,7 @@ def googleauth():
     flow = get_google_flow()
     authorization_url, state = flow.authorization_url(
         access_type='offline',
-        include_granted_scopes='true',
+       
     )
     session['state'] = state
     logging.info(f"Redirecting user to Google for authorization: {authorization_url}")
