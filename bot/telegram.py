@@ -5,6 +5,7 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Callba
 from bot import bot_commands
 from flask import url_for
 
+
 class TelegramBot:
     def __init__(self, token: str):
         self.token = token
@@ -12,6 +13,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("connect", self.connect_command))
+        
 
     async def start_command(self, update: Update, context: CallbackContext):
         logging.info(f"Start command from user {update.effective_user.id}")
@@ -39,6 +41,7 @@ class TelegramBot:
 
     async def handle_update(self, data: json):
         try:
+            await self.application.bot.initialize()
             update = Update.de_json(data, self.application.bot)
             await self.application.process_update(update)
             logging.info(f"Telegram update processed: {update.update_id}")
