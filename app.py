@@ -63,15 +63,12 @@ def get_user_from_db(google_id):
 
 # Конфигурация Google OAuth
 def get_google_flow():
+    GOOGLE_CREDENTIALS = json.loads(os.environ.get('GOOGLE_CREDENTIALS'))
+    scopes = GOOGLE_CREDENTIALS['web']['scopes']
     CLIENT_SECRET_JSON = json.loads(os.environ.get('GOOGLE_CLIENT_SECRET_JSON'))
     flow = Flow.from_client_config(
         CLIENT_SECRET_JSON,
-        scopes=[
-            'https://www.googleapis.com/auth/fitness.activity.read',
-            'https://www.googleapis.com/auth/fitness.body.read',
-            'https://www.googleapis.com/auth/fitness.location.read',
-            'openid', 'email', 'profile'
-        ],
+        scopes=scopes,
         redirect_uri=os.environ.get('GOOGLE_AUTH_REDIRECT')
     )
     return flow
