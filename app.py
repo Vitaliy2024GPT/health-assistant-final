@@ -178,11 +178,11 @@ async def telegram_webhook():
         telegram_bot = TelegramBot(os.environ.get('TELEGRAM_TOKEN'))
 
     try:
-        data = request.get_json()
+        data = await request.get_json()
         if not data:
             logging.warning("No data received from Telegram webhook.")
             return {"status": "ok"}
-        telegram_bot.handle_update(data)
+        await telegram_bot.handle_update(data)
         logging.info("Telegram update processed successfully.")
         return {"status": "ok"}
 
