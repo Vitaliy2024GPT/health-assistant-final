@@ -182,7 +182,7 @@ async def telegram_webhook():
         if not data:
             logging.warning("No data received from Telegram webhook.")
             return {"status": "ok"}
-        await telegram_bot.handle_update(data)
+        telegram_bot.handle_update(data)
         logging.info("Telegram update processed successfully.")
         return {"status": "ok"}
 
