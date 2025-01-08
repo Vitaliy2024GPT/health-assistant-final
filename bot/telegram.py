@@ -1,22 +1,19 @@
 import logging
 import json
-import os
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, CallbackContext
 from bot import bot_commands
 from flask import url_for
-from queue import Queue
 
 
 class TelegramBot:
     def __init__(self, token: str):
         self.token = token
-        self.updater = Updater(token, update_queue=Queue())
-        self.dispatcher = self.updater.dispatcher
-        self.dispatcher.add_handler(CommandHandler("start", self.start_command))
-        self.dispatcher.add_handler(CommandHandler("help", self.help_command))
-        self.dispatcher.add_handler(CommandHandler("connect", self.connect_command))
-        self.updater.start_polling()
+        self.application = ApplicationBuilder().token(token).build()
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("help", self.help_command))
+        self.application.add_handler(CommandHandler("connect", self.connect_command))
+        
 
     async def start_command(self, update: Update, context: CallbackContext):
         logging.info(f"Start command from user {update.effective_user.id}")
@@ -44,8 +41,8 @@ class TelegramBot:
 
     def handle_update(self, data: json):
         try:
-            update = Update.de_json(data, self.updater.bot)
-            self.dispatcher.process_update(update)
+            update = Update.de_json(data, self.application.bot)
+            self.application.process_update(update)
             logging.info(f"Telegram update processed: {update.update_id}")
         except Exception as e:
             logging.error(f"Error on handle_update {e}")
