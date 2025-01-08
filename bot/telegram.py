@@ -5,7 +5,6 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Callba
 from bot import bot_commands
 from flask import url_for
 
-
 class TelegramBot:
     def __init__(self, token: str):
         self.token = token
@@ -39,10 +38,10 @@ class TelegramBot:
             text=message
         )
 
-    def handle_update(self, data: json):
+    async def handle_update(self, data: json):
         try:
             update = Update.de_json(data, self.application.bot)
-            self.application.process_update(update)
+            await self.application.process_update(update)
             logging.info(f"Telegram update processed: {update.update_id}")
         except Exception as e:
             logging.error(f"Error on handle_update {e}")
